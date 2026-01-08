@@ -1,0 +1,74 @@
+{
+  "ontology_id": "onto_demo_001",
+  "project_id": "proj_demo_001",
+  "version": "1.0.0",
+  "language": "zh-cn",
+  "entity_types": [
+    "人物",
+    "机构",
+    "地点",
+    "论文",
+    "数据集",
+    "方法",
+    "模型",
+    "任务",
+    "指标",
+    "设备",
+    "图像",
+    "表格",
+    "公式",
+    "Other"
+  ],
+  "relation_types": [
+    "隶属",
+    "提出",
+    "使用",
+    "评测",
+    "对比",
+    "包含",
+    "引用",
+    "生成",
+    "位于",
+    "描述",
+    "Other"
+  ],
+  "entity_attributes": {
+    "人物": {
+      "affiliations": {"type": "string[]", "required": false, "desc": "人物所属机构（可多值）"},
+      "roles": {"type": "string[]", "required": false, "desc": "人物角色：作者/导师/负责人等"},
+      "orcid": {"type": "string", "required": false, "desc": "ORCID（若文本明确出现）"}
+    },
+    "论文": {
+      "title": {"type": "string", "required": false, "desc": "论文标题"},
+      "year": {"type": "int", "required": false, "desc": "发表年份"},
+      "venue": {"type": "string", "required": false, "desc": "发表会议/期刊"},
+      "doi": {"type": "string", "required": false, "desc": "DOI（若文本明确出现）"}
+    },
+    "数据集": {
+      "name": {"type": "string", "required": false, "desc": "数据集名称"},
+      "domain": {"type": "string", "required": false, "desc": "领域/任务"},
+      "license": {"type": "string", "required": false, "desc": "许可证"}
+    },
+    "图像": {
+      "page": {"type": "int", "required": false, "desc": "来源页码（来自 MinerU 映射）"},
+      "bbox": {"type": "number[4]", "required": false, "desc": "页面坐标 bbox（若有）"},
+      "caption": {"type": "string", "required": false, "desc": "图注"}
+    }
+  },
+  "relation_attributes": {
+    "提出": {
+      "evidence_level": {"type": "string", "required": false, "desc": "证据强度：明确/推断/弱"}
+    },
+    "评测": {
+      "metric": {"type": "string", "required": false, "desc": "指标名称"},
+      "value": {"type": "string", "required": false, "desc": "指标值"}
+    }
+  },
+  "normalization_rules": {
+    "alias": {
+      "BERT-base": ["bert base", "BERT Base"],
+      "图神经网络": ["GNN", "Graph Neural Network"]
+    },
+    "blacklist_entities": ["本研究", "本文", "我们"]
+  }
+}
