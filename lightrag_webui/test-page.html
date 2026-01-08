@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>Test Page - Static HTML Works!</h1>
+    <div id="test">If you see this, HTML loads fine.</div>
+
+    <script>
+        console.log('JavaScript works!');
+        document.getElementById('test').innerHTML = '<p style="color: green; font-size: 20px;">JavaScript executes successfully!</p>';
+
+        // Test React
+        fetch('/webui/src/main.tsx')
+            .then(r => r.text())
+            .then(code => {
+                console.log('main.tsx loaded, length:', code.length);
+            })
+            .catch(err => {
+                console.error('Failed to load main.tsx:', err);
+            });
+    </script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Debug Test</title>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        // 直接测试
+        const root = document.getElementById('root');
+
+        // 测试1: 基础DOM操作
+        root.innerHTML = '<h1 style="color: red;">测试1: DOM操作成功</h1>';
+
+        // 测试2: React加载
+        import('react').then(React => {
+            const element = React.createElement('div', null,
+                React.createElement('h2', { style: { color: 'blue' } }, '测试2: React加载成功'),
+                React.createElement('p', null, 'React版本: ' + React.version)
+            );
+            root.appendChild(element);
+        }).catch(err => {
+            root.innerHTML += '<p style="color: red;">React加载失败: ' + err.message + '</p>';
+        });
+
+        // 测试3: React DOM加载
+        import('react-dom/client').then(ReactDOM => {
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+
+            const App = () => {
+                return React.createElement('div', { style: { padding: '20px', background: '#f0f0f0' } },
+                    React.createElement('h2', { style: { color: 'green' } }, '测试3: ReactDOM渲染成功'),
+                    React.createElement('p', null, '时间: ' + new Date().toLocaleString())
+                );
+            };
+
+            ReactDOM.createRoot(container).render(React.createElement(App));
+        }).catch(err => {
+            root.innerHTML += '<p style="color: red;">ReactDOM加载失败: ' + err.message + '</p>';
+        });
+    </script>
+</body>
+</html>
