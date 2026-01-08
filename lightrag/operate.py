@@ -50,6 +50,7 @@ from lightrag.base import (
     QueryContextResult,
 )
 from lightrag.prompt import PROMPTS
+from lightrag.ontology import OntologyService, OntologyPromptInjector
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -454,12 +455,14 @@ async def _handle_single_relationship_extraction(
     timestamp: int,
     file_path: str = "unknown_source",
 ):
-    if (
-        len(record_attributes) != 5 or "relation" not in record_attributes[0]
-    ):  # treat "relationship" and "relation" interchangeable
-        if len(record_attributes) > 1 and "relation" in record_attributes[0]:
+    # Support both 5-field (old) and 6-field (new with relation_type) formats
+    # Old: relation, source, target, keywords, description
+    # New: relation, source, target, relation_type, keywords, description
+    num_fields = len(record_attributes)
+    if num_fields not in (5, 6) or "relation" not in record_attributes[0]:
+        if num_fields > 1 and "relation" in record_attributes[0]:
             logger.warning(
-                f"{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
+                f"{chunk_key}: LLM output format error; found {num_fields}/5 or /6 fields on RELATION `{record_attributes[1]}`~`{record_attributes[2] if num_fields > 2 else 'N/A'}`"
             )
             logger.debug(record_attributes)
         return None
@@ -491,14 +494,27 @@ async def _handle_single_relationship_extraction(
             )
             return None
 
-        # Process keywords with same cleaning pipeline
-        edge_keywords = sanitize_and_normalize_extracted_text(
-            record_attributes[3], remove_inner_quotes=True
-        )
-        edge_keywords = edge_keywords.replace("，", ",")
-
-        # Process relationship description with same cleaning pipeline
-        edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
+        # Extract relation_type (new format) or keywords (old format)
+        # New 6-field format: relation, source, target, relation_type, keywords, description
+        # Old 5-field format: relation, source, target, keywords, description
+        if num_fields == 6:
+            # New format with relation_type
+            relation_type = sanitize_and_normalize_extracted_text(
+                record_attributes[3], remove_inner_quotes=True
+            )
+            edge_keywords = sanitize_and_normalize_extracted_text(
+                record_attributes[4], remove_inner_quotes=True
+            )
+            edge_keywords = edge_keywords.replace("，", ",")
+            edge_description = sanitize_and_normalize_extracted_text(record_attributes[5])
+        else:
+            # Old format (5 fields) - no relation_type
+            relation_type = ""
+            edge_keywords = sanitize_and_normalize_extracted_text(
+                record_attributes[3], remove_inner_quotes=True
+            )
+            edge_keywords = edge_keywords.replace("，", ",")
+            edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
 
         edge_source_id = chunk_key
         weight = (
@@ -516,6 +532,7 @@ async def _handle_single_relationship_extraction(
             source_id=edge_source_id,
             file_path=file_path,
             timestamp=timestamp,
+            relation_type=relation_type,  # New field
         )
 
     except ValueError as e:
@@ -1891,6 +1908,7 @@ async def _merge_edges_then_upsert(
     already_source_ids = []
     already_description = []
     already_keywords = []
+    already_relation_types = []  # New: for relation_type field
     already_file_paths = []
 
     # 1. Get existing edge data from graph storage
@@ -1924,6 +1942,14 @@ async def _merge_edges_then_upsert(
                 already_keywords.extend(
                     split_string_by_multi_markers(
                         already_edge["keywords"], [GRAPH_FIELD_SEP]
+                    )
+                )
+
+            # Get relation_type with empty string default if missing or None (new field)
+            if already_edge.get("relation_type") is not None:
+                already_relation_types.extend(
+                    split_string_by_multi_markers(
+                        already_edge["relation_type"], [GRAPH_FIELD_SEP]
                     )
                 )
 
@@ -2027,6 +2053,21 @@ async def _merge_edges_then_upsert(
             )
     # Join all unique keywords with commas
     keywords = ",".join(sorted(all_keywords))
+
+    # 6.3 Finalize relation_type by merging existing and new relation_types
+    # For relation_type, we'll use the first non-empty one (simple approach)
+    # Can be refined later if needed for multiple relation types per edge
+    all_relation_types = set()
+    # Process already_relation_types
+    for rt in already_relation_types:
+        if rt:  # Skip empty strings
+            all_relation_types.add(rt.strip())
+    # Process new relation_types from edges_data
+    for edge in edges_data:
+        if edge.get("relation_type"):
+            all_relation_types.add(edge["relation_type"].strip())
+    # Use first relation_type if available, otherwise empty string
+    relation_type = next(iter(all_relation_types)) if all_relation_types else ""
 
     # 7. Deduplicate by description, keeping first occurrence in the same document
     unique_edges = {}
@@ -2343,6 +2384,7 @@ async def _merge_edges_then_upsert(
             file_path=file_path,
             created_at=edge_created_at,
             truncate=truncation_info,
+            relation_type=relation_type,  # New field
         ),
     )
 
@@ -2356,6 +2398,7 @@ async def _merge_edges_then_upsert(
         created_at=edge_created_at,
         truncate=truncation_info,
         weight=weight,
+        relation_type=relation_type,  # New field
     )
 
     # Sort src_id and tgt_id to ensure consistent ordering (smaller string first)
@@ -2382,6 +2425,7 @@ async def _merge_edges_then_upsert(
                 "description": description,
                 "weight": weight,
                 "file_path": file_path,
+                "relation_type": relation_type,  # New field
             }
         }
         await safe_vdb_operation_with_exception(
@@ -2791,6 +2835,48 @@ async def extract_entities(
         "entity_types", DEFAULT_ENTITY_TYPES
     )
 
+    # Ontology-driven extraction: Load ontology if available
+    ontology_injection = ""
+    relation_types = None
+    kv_storage_instance = global_config.get("kv_storage")
+    ontology_id = global_config["addon_params"].get("ontology_id")
+    project_id = global_config["addon_params"].get("project_id")
+
+    if kv_storage_instance and (ontology_id or project_id):
+        try:
+            ontology_service = OntologyService(kv_storage_instance)
+            injector = OntologyPromptInjector()
+
+            # Get ontology_id from project if needed
+            effective_ontology_id = ontology_id
+            if project_id and not ontology_id:
+                from lightrag.projects import ProjectManager
+                project_manager = ProjectManager(kv_storage_instance)
+                project = await project_manager.get(project_id)
+                if project:
+                    effective_ontology_id = project.ontology_id
+
+            # Load and inject ontology
+            if effective_ontology_id:
+                ontology = await ontology_service.get(effective_ontology_id)
+                if ontology:
+                    # Override entity_types and relation_types from ontology
+                    entity_types = ontology.entity_types
+                    relation_types = ontology.relation_types
+
+                    # Generate ontology injection text
+                    ontology_injection = injector.inject_into_extraction_prompt(
+                        ontology,
+                        language=language
+                    )
+                    logger.info(f"Loaded ontology '{effective_ontology_id}' with {len(entity_types)} entity types and {len(relation_types)} relation types")
+        except Exception as e:
+            logger.warning(f"Failed to load ontology for extraction: {e}")
+
+    # Set default relation_types if not provided by ontology
+    if relation_types is None:
+        relation_types = ["related_to", "part_of", "located_in", "created_by", "belongs_to"]
+
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
     example_context_base = dict(
@@ -2806,8 +2892,10 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=",".join(entity_types),
+        relation_types=",".join(relation_types),
         examples=examples,
         language=language,
+        ontology_injection=ontology_injection,
     )
 
     processed_chunks = 0

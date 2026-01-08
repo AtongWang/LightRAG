@@ -439,7 +439,29 @@ class LightRAG:
     ollama_server_infos: Optional[OllamaServerInfos] = field(default=None)
     """Configuration for Ollama server information."""
 
+    # Multimodal Parser Configuration
+    # ---
+
+    multimodal_enabled: bool = field(
+        default_factory=lambda: get_env_value("MULTIMODAL_ENABLED", False, bool)
+    )
+    """Enable multimodal document parsing (PDF, images, etc.) via RAGAnything."""
+
+    multimodal_raganything_url: str = field(
+        default_factory=lambda: get_env_value(
+            "MULTIMODAL_RAGANYTHING_URL", "http://127.0.0.1:30000", str
+        )
+    )
+    """RAGAnything service URL for multimodal parsing."""
+
+    multimodal_timeout: int = field(
+        default_factory=lambda: get_env_value("MULTIMODAL_TIMEOUT", 300, int)
+    )
+    """Timeout in seconds for multimodal parsing operations."""
+
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
+    _multimodal_parser: Optional[Any] = field(default=None, init=False, repr=False)
+    """Internal multimodal parser instance (created on first use)."""
 
     def __post_init__(self):
         from lightrag.kg.shared_storage import (
@@ -707,6 +729,29 @@ class LightRAG:
             self._storages_status = StoragesStatus.INITIALIZED
             logger.debug("All storage types initialized")
 
+    def _get_multimodal_parser(self):
+        """Get or create the multimodal parser instance
+
+        Returns:
+            MultimodalParser instance if enabled, None otherwise
+        """
+        if not self.multimodal_enabled:
+            return None
+
+        if self._multimodal_parser is None:
+            from lightrag.multimodal import MultimodalParser
+
+            self._multimodal_parser = MultimodalParser(
+                raganything_url=self.multimodal_raganything_url,
+                enabled=True,
+                timeout=self.multimodal_timeout,
+            )
+            logger.debug(
+                f"Created multimodal parser for RAGAnything at {self.multimodal_raganything_url}"
+            )
+
+        return self._multimodal_parser
+
     async def finalize_storages(self):
         """Asynchronously finalize the storages with improved error handling"""
         if self._storages_status == StoragesStatus.INITIALIZED:
@@ -754,6 +799,16 @@ class LightRAG:
                 logger.debug("All storages finalized successfully")
 
             self._storages_status = StoragesStatus.FINALIZED
+
+        # Clean up multimodal parser if initialized
+        if self._multimodal_parser is not None:
+            try:
+                await self._multimodal_parser.close()
+                logger.debug("Successfully closed multimodal parser")
+            except Exception as e:
+                logger.error(f"Failed to close multimodal parser: {e}")
+            finally:
+                self._multimodal_parser = None
 
     async def check_and_migrate_data(self):
         """Check if data migration is needed and perform migration if necessary"""
@@ -4039,4 +4094,165 @@ class LightRAG:
 
         loop.run_until_complete(
             self.aexport_data(output_path, file_format, include_vector_data)
+        )
+
+    async def aenrich_entity(
+        self,
+        entity_name: str,
+        ontology_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Asynchronously enrich a single entity with additional information.
+
+        This method uses LLM to enrich the entity with additional attributes,
+        descriptions, and context based on the ontology (if provided).
+
+        Args:
+            entity_name: Name of the entity to enrich
+            ontology_id: Optional ontology ID to guide enrichment
+
+        Returns:
+            Dict containing enrichment result with fields:
+                - entity_name: str
+                - status: str ("completed", "failed", "skipped")
+                - original_data: dict
+                - enriched_data: dict
+                - error_message: str or None
+                - processing_time: float
+        """
+        from lightrag.enrichment import EntityEnrichmentService, EnrichmentConfig
+
+        # Get LLM function
+        llm_func = self.llm_model_func
+
+        # Apply priority wrapper
+        from functools import partial
+        llm_func = partial(llm_func, _priority=8)
+
+        # Create enrichment service
+        enrichment_service = EntityEnrichmentService(
+            graph_storage=self.chunk_entity_relation_graph,
+            kv_storage=self.llm_response_cache,
+            llm_model_func=llm_func,
+            config=EnrichmentConfig(
+                language=self.addon_params.get("language", "English")
+            )
+        )
+
+        # Perform enrichment
+        result = await enrichment_service.enrich_entity(
+            entity_name=entity_name,
+            ontology_id=ontology_id
+        )
+
+        # Return as dict for JSON serialization
+        return {
+            "entity_name": result.entity_name,
+            "status": result.status.value,
+            "original_data": result.original_data,
+            "enriched_data": result.enriched_data,
+            "error_message": result.error_message,
+            "processing_time": result.processing_time,
+        }
+
+    def enrich_entity(
+        self,
+        entity_name: str,
+        ontology_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Synchronously enrich a single entity.
+
+        Args:
+            entity_name: Name of the entity to enrich
+            ontology_id: Optional ontology ID to guide enrichment
+
+        Returns:
+            Dict containing enrichment result
+        """
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(
+            self.aenrich_entity(entity_name, ontology_id)
+        )
+
+    async def aenrich_entities(
+        self,
+        entity_names: List[str],
+        ontology_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Asynchronously enrich multiple entities in batch.
+
+        Args:
+            entity_names: List of entity names to enrich
+            ontology_id: Optional ontology ID to guide enrichment
+
+        Returns:
+            Dict containing batch enrichment result with fields:
+                - total_entities: int
+                - succeeded: int
+                - failed: int
+                - skipped: int
+                - results: list of individual results
+                - total_time: float
+        """
+        from lightrag.enrichment import EntityEnrichmentService, EnrichmentConfig
+        from functools import partial
+
+        # Get LLM function
+        llm_func = self.llm_model_func
+        llm_func = partial(llm_func, _priority=8)
+
+        # Create enrichment service
+        enrichment_service = EntityEnrichmentService(
+            graph_storage=self.chunk_entity_relation_graph,
+            kv_storage=self.llm_response_cache,
+            llm_model_func=llm_func,
+            config=EnrichmentConfig(
+                language=self.addon_params.get("language", "English")
+            )
+        )
+
+        # Perform batch enrichment
+        batch_result = await enrichment_service.enrich_entities(
+            entity_names=entity_names,
+            ontology_id=ontology_id
+        )
+
+        # Convert results to dicts
+        results_dict = [
+            {
+                "entity_name": r.entity_name,
+                "status": r.status.value,
+                "original_data": r.original_data,
+                "enriched_data": r.enriched_data,
+                "error_message": r.error_message,
+                "processing_time": r.processing_time,
+            }
+            for r in batch_result.results
+        ]
+
+        return {
+            "total_entities": batch_result.total_entities,
+            "succeeded": batch_result.succeeded,
+            "failed": batch_result.failed,
+            "skipped": batch_result.skipped,
+            "results": results_dict,
+            "total_time": batch_result.total_time,
+        }
+
+    def enrich_entities(
+        self,
+        entity_names: List[str],
+        ontology_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Synchronously enrich multiple entities in batch.
+
+        Args:
+            entity_names: List of entity names to enrich
+            ontology_id: Optional ontology ID to guide enrichment
+
+        Returns:
+            Dict containing batch enrichment result
+        """
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(
+            self.aenrich_entities(entity_names, ontology_id)
         )
