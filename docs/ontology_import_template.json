@@ -1,0 +1,94 @@
+{
+  "name": "文化遗产知识图谱本体",
+  "description": "用于文化遗产领域的知识抽取本体规范",
+  "language": "zh",
+  "entity_types": [
+    "Person",
+    "Organization",
+    "Location",
+    "Event",
+    "Artifact",
+    "Concept",
+    "TimePeriod",
+    "Other"
+  ],
+  "relation_types": [
+    "创作",
+    "属于",
+    "位于",
+    "发生于",
+    "关联",
+    "影响",
+    "继承",
+    "包含",
+    "Other"
+  ],
+  "entity_attributes": {
+    "Person": {
+      "birth_date": {
+        "type": "date",
+        "required": false,
+        "description": "出生日期"
+      },
+      "nationality": {
+        "type": "string",
+        "required": false,
+        "description": "国籍"
+      },
+      "occupation": {
+        "type": "string",
+        "required": false,
+        "description": "职业",
+        "enum_values": ["艺术家", "政治家", "学者", "工匠", "其他"]
+      }
+    },
+    "Artifact": {
+      "creation_date": {
+        "type": "date",
+        "required": false,
+        "description": "创作日期"
+      },
+      "material": {
+        "type": "string",
+        "required": false,
+        "description": "材质"
+      }
+    },
+    "TimePeriod": {
+      "start_year": {
+        "type": "number",
+        "required": false,
+        "description": "起始年份",
+        "min_value": -5000,
+        "max_value": 2100
+      },
+      "end_year": {
+        "type": "number",
+        "required": false,
+        "description": "结束年份"
+      }
+    }
+  },
+  "relation_attributes": {
+    "创作": {
+      "role": {
+        "type": "string",
+        "required": false,
+        "description": "创作角色",
+        "enum_values": ["主创", "协作", "指导"]
+      }
+    },
+    "影响": {
+      "influence_strength": {
+        "type": "string",
+        "required": false,
+        "description": "影响程度",
+        "enum_values": ["强", "中", "弱"]
+      }
+    }
+  },
+  "normalization_rules": {
+    "case_sensitive": false,
+    "trim_whitespace": true
+  }
+}

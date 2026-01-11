@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from lightrag import LightRAG
 from lightrag.ontology import OntologyService, OntologyValidator, OntologySpec
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.utils import logger
 from ..config import global_args
 
 
@@ -188,6 +189,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
 
             # 更新字段
             update_data = request.model_dump(exclude_unset=True)
+            logger.debug(f"Update ontology {ontology_id} with data: {update_data}")
             for field, value in update_data.items():
                 if hasattr(ontology, field) and value is not None:
                     setattr(ontology, field, value)
@@ -204,6 +206,8 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         except HTTPException:
             raise
         except Exception as e:
+            import traceback
+            logger.error(f"Update ontology error: {e}\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.delete(
@@ -331,6 +335,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         """导入本体
 
         从 JSON 数据导入本体规范，用于恢复或迁移。
+        如果项目已有本体，会自动覆盖。
         会创建新的本体 ID。
         """
         try:
@@ -361,8 +366,8 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
                 updated_at=datetime.utcnow().isoformat(),
             )
 
-            # 创建本体
-            ontology = await ontology_service.create(ontology_spec)
+            # 创建本体 (force=True to overwrite if exists)
+            ontology = await ontology_service.create(ontology_spec, force=True)
 
             # 更新项目的 ontology_id
             from lightrag.projects import ProjectManager
@@ -371,12 +376,13 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
                 await project_manager.set_ontology_id(request.project_id, ontology.ontology_id)
             except Exception as e:
                 # 项目可能不存在，这不应该阻止本体导入
-                from lightrag.utils import logger
                 logger.warning(f"Could not update project with ontology_id: {e}")
 
             return OntologyResponse(**ontology.to_dict())
 
         except Exception as e:
+            import traceback
+            logger.error(f"Import ontology error: {e}\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=str(e))
 
     return router

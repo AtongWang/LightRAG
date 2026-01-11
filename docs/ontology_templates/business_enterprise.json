@@ -1,0 +1,164 @@
+{
+  "name": "企业商业知识图谱",
+  "description": "用于企业关系分析、供应链和市场研究的本体",
+  "language": "zh",
+  "entity_types": [
+    "Company",
+    "Person",
+    "Product",
+    "Industry",
+    "Location",
+    "Event",
+    "Patent",
+    "Brand",
+    "Other"
+  ],
+  "relation_types": [
+    "投资",
+    "收购",
+    "合作",
+    "竞争",
+    "供应",
+    "任职",
+    "创立",
+    "生产",
+    "位于",
+    "Other"
+  ],
+  "entity_attributes": {
+    "Company": {
+      "founded_year": {
+        "type": "number",
+        "required": false,
+        "description": "成立年份",
+        "min_value": 1800,
+        "max_value": 2100
+      },
+      "industry": {
+        "type": "string",
+        "required": false,
+        "description": "所属行业"
+      },
+      "stock_code": {
+        "type": "string",
+        "required": false,
+        "description": "股票代码"
+      },
+      "employee_count": {
+        "type": "number",
+        "required": false,
+        "description": "员工数量"
+      },
+      "revenue": {
+        "type": "string",
+        "required": false,
+        "description": "营收规模"
+      }
+    },
+    "Person": {
+      "position": {
+        "type": "string",
+        "required": false,
+        "description": "职位"
+      },
+      "nationality": {
+        "type": "string",
+        "required": false,
+        "description": "国籍"
+      }
+    },
+    "Product": {
+      "category": {
+        "type": "string",
+        "required": false,
+        "description": "产品类别"
+      },
+      "launch_date": {
+        "type": "date",
+        "required": false,
+        "description": "发布日期"
+      },
+      "price": {
+        "type": "string",
+        "required": false,
+        "description": "价格"
+      }
+    },
+    "Patent": {
+      "patent_number": {
+        "type": "string",
+        "required": false,
+        "description": "专利号"
+      },
+      "filing_date": {
+        "type": "date",
+        "required": false,
+        "description": "申请日期"
+      },
+      "status": {
+        "type": "string",
+        "required": false,
+        "description": "专利状态",
+        "enum_values": ["申请中", "已授权", "已失效"]
+      }
+    }
+  },
+  "relation_attributes": {
+    "投资": {
+      "amount": {
+        "type": "string",
+        "required": false,
+        "description": "投资金额"
+      },
+      "round": {
+        "type": "string",
+        "required": false,
+        "description": "融资轮次",
+        "enum_values": ["天使轮", "A轮", "B轮", "C轮", "D轮", "IPO", "战略投资"]
+      },
+      "date": {
+        "type": "date",
+        "required": false,
+        "description": "投资日期"
+      }
+    },
+    "收购": {
+      "amount": {
+        "type": "string",
+        "required": false,
+        "description": "收购金额"
+      },
+      "date": {
+        "type": "date",
+        "required": false,
+        "description": "收购日期"
+      },
+      "stake": {
+        "type": "string",
+        "required": false,
+        "description": "收购股份比例"
+      }
+    },
+    "任职": {
+      "position": {
+        "type": "string",
+        "required": false,
+        "description": "担任职位"
+      },
+      "start_date": {
+        "type": "date",
+        "required": false,
+        "description": "任职开始日期"
+      },
+      "end_date": {
+        "type": "date",
+        "required": false,
+        "description": "任职结束日期"
+      }
+    }
+  },
+  "normalization_rules": {
+    "case_sensitive": false,
+    "trim_whitespace": true
+  }
+}

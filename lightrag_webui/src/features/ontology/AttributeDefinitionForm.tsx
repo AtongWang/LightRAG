@@ -3,7 +3,7 @@
  * Form for defining attributes for entity types or relation types
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
@@ -41,7 +41,7 @@ export function AttributeDefinitionForm({
   onChange,
   readonly = false
 }: AttributeDefinitionFormProps) {
-  const [fields, setFields] = useState<AttributeField[]>(
+  const [fields, setFields] = useState<AttributeField[]>(() =>
     Object.entries(initialData).map(([name, def]) => ({
       name,
       type: def.type,
@@ -53,7 +53,20 @@ export function AttributeDefinitionForm({
     }))
   )
 
+  // Use ref to store onChange to avoid dependency issues
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+
+  // Track if this is the first render
+  const isFirstRender = useRef(true)
+
   useEffect(() => {
+    // Skip first render to avoid unnecessary onChange call
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+
     const attributes: Record<string, AttributeDefinition> = {}
     fields.forEach(field => {
       if (field.name.trim()) {
@@ -67,8 +80,8 @@ export function AttributeDefinitionForm({
         }
       }
     })
-    onChange(attributes)
-  }, [fields, onChange])
+    onChangeRef.current(attributes)
+  }, [fields])
 
   const addField = () => {
     setFields([

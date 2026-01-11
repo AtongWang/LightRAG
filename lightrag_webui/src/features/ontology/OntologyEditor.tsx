@@ -14,7 +14,9 @@ import Input from '@/components/ui/Input'
 import { EntityTypeList } from './EntityTypeList'
 import { RelationTypeList } from './RelationTypeList'
 import { AttributeDefinitionForm } from './AttributeDefinitionForm'
-import { Save, CheckCircle2, AlertCircle, Download, Upload, Eye } from 'lucide-react'
+import { OntologyImportDialog } from './OntologyImportDialog'
+import { Save, CheckCircle2, AlertCircle, Download, Upload, Eye, Plus, Trash2 } from 'lucide-react'
+import { importOntology } from '@/api/ontology'
 import type { OntologySpec, AttributeDefinition } from '@/types/ontology'
 
 interface OntologyEditorProps {
@@ -28,7 +30,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     error,
     validationError,
     fetchOntology,
+    createOntology,
     updateOntology,
+    deleteOntology,
     validateOntology: validateOntologyStore,
     clearError
   } = useOntologyStore()
@@ -36,7 +40,13 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   const [activeTab, setActiveTab] = useState<'entities' | 'relations'>('entities')
   const [hasChanges, setHasChanges] = useState(false)
   const [editingAttributesFor, setEditingAttributesFor] = useState<string | null>(null)
+  const [editingAttributeType, setEditingAttributeType] = useState<'entity' | 'relation'>('entity')
   const [isValidating, setIsValidating] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
   const [validationResult, setValidationResult] = useState<{
     isValid: boolean
     warnings?: string[]
@@ -51,25 +61,40 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   }, [projectId, fetchOntology])
 
   useEffect(() => {
-    if (currentOntology && !workingOntology) {
+    if (currentOntology) {
       setWorkingOntology({ ...currentOntology })
+      setHasChanges(false)
     }
-  }, [currentOntology, workingOntology])
+  }, [currentOntology])
 
   const handleSave = async () => {
     if (!workingOntology) return
 
+    setIsSaving(true)
     try {
       await updateOntology(workingOntology.ontology_id, {
+        name: workingOntology.name,
+        description: workingOntology.description,
         entity_types: workingOntology.entity_types,
         relation_types: workingOntology.relation_types,
         entity_attributes: workingOntology.entity_attributes,
         relation_attributes: workingOntology.relation_attributes
       })
       setHasChanges(false)
-      setValidationResult(null)
+      setValidationResult({
+        isValid: true,
+        warnings: ['保存成功']
+      })
+      // Refresh ontology after save
+      fetchOntology(projectId)
     } catch (error) {
       console.error('Failed to save ontology:', error)
+      setValidationResult({
+        isValid: false,
+        error: error instanceof Error ? error.message : '保存失败'
+      })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -94,10 +119,73 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     }
   }
 
+  const handleImportClick = () => {
+    setImportDialogOpen(true)
+  }
+
+  const handleImportOntology = async (jsonData: string) => {
+    setIsImporting(true)
+    try {
+      const imported = await importOntology(projectId, jsonData)
+      // Refresh ontology after import
+      await fetchOntology(projectId)
+      setValidationResult({
+        isValid: true,
+        warnings: [`成功导入本体: ${imported.name}`]
+      })
+    } catch (error) {
+      console.error('Failed to import ontology:', error)
+      throw error // Re-throw so dialog can handle it
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  const handleClearOntology = async () => {
+    if (!workingOntology) return
+
+    const confirmed = window.confirm(
+      '确定要清除当前本体吗？清除后可以重新创建或导入新本体。此操作不可撤销。'
+    )
+    if (!confirmed) return
+
+    setIsClearing(true)
+    try {
+      await deleteOntology(workingOntology.ontology_id)
+      setWorkingOntology(null)
+      setHasChanges(false)
+      setValidationResult({
+        isValid: true,
+        warnings: ['本体已清除，可以创建新本体或导入']
+      })
+      // Refresh to show create ontology UI
+      await fetchOntology(projectId)
+    } catch (error) {
+      console.error('Failed to clear ontology:', error)
+      setValidationResult({
+        isValid: false,
+        error: error instanceof Error ? error.message : '清除本体失败'
+      })
+    } finally {
+      setIsClearing(false)
+    }
+  }
+
   const handleExport = () => {
     if (!workingOntology) return
 
-    const dataStr = JSON.stringify(workingOntology, null, 2)
+    // Export format for reimport (without system fields)
+    const exportData = {
+      name: workingOntology.name,
+      description: workingOntology.description,
+      language: workingOntology.language,
+      entity_types: workingOntology.entity_types,
+      relation_types: workingOntology.relation_types,
+      entity_attributes: workingOntology.entity_attributes,
+      relation_attributes: workingOntology.relation_attributes,
+      normalization_rules: workingOntology.normalization_rules
+    }
+    const dataStr = JSON.stringify(exportData, null, 2)
     const dataBlob = new Blob([dataStr], { type: 'application/json' })
     const url = URL.createObjectURL(dataBlob)
     const link = document.createElement('a')
@@ -197,16 +285,19 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
   const handleEditEntityAttributes = (entityType: string) => {
     setEditingAttributesFor(entityType)
+    setEditingAttributeType('entity')
   }
 
   const handleEditRelationAttributes = (relationType: string) => {
     setEditingAttributesFor(relationType)
+    setEditingAttributeType('relation')
   }
 
   const handleAttributesChange = (attributes: Record<string, AttributeDefinition>) => {
     if (!workingOntology || !editingAttributesFor) return
 
-    const isEntityType = workingOntology.entity_types.includes(editingAttributesFor)
+    // Use editingAttributeType to determine whether to update entity or relation attributes
+    const isEntityType = editingAttributeType === 'entity'
 
     setWorkingOntology({
       ...workingOntology,
@@ -216,6 +307,29 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       )
     })
     setHasChanges(true)
+  }
+
+  // Handler for creating new ontology
+  const handleCreateOntology = async () => {
+    setIsCreating(true)
+    try {
+      const newOntology = await createOntology({
+        project_id: projectId,
+        name: '默认本体',
+        description: '项目默认本体规范',
+        language: 'zh',
+        // Note: 'Other' is required by validator for fallback classification
+        entity_types: ['Person', 'Organization', 'Location', 'Event', 'Concept', 'Other'],
+        relation_types: ['关联', '属于', '位于', '参与', '影响', 'Other'],
+        entity_attributes: {},
+        relation_attributes: {}
+      })
+      setWorkingOntology({ ...newOntology })
+    } catch (error) {
+      console.error('Failed to create ontology:', error)
+    } finally {
+      setIsCreating(false)
+    }
   }
 
   if (loading) {
@@ -242,18 +356,81 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     )
   }
 
+  if (!workingOntology && !currentOntology) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>本体设置</CardTitle>
+          <CardDescription>此项目尚未配置本体规范，请选择创建或导入本体</CardDescription>
+        </CardHeader>
+        <CardContent className="p-6">
+          {/* Import Dialog - needed even when no ontology */}
+          <OntologyImportDialog
+            open={importDialogOpen}
+            onOpenChange={setImportDialogOpen}
+            onImport={handleImportOntology}
+            isImporting={isImporting}
+          />
+          <div className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              本体定义了知识图谱的实体类型和关系类型，是进行知识抽取的基础。
+            </p>
+            <div className="flex justify-center gap-4">
+              <Button 
+                onClick={handleCreateOntology}
+                disabled={isCreating}
+                className="gap-2"
+              >
+                {isCreating ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    创建中...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    创建默认本体
+                  </>
+                )}
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={handleImportClick}
+                disabled={isImporting}
+                className="gap-2"
+              >
+                {isImporting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                    导入中...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    导入本体
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!workingOntology) {
     return (
       <Card>
         <CardContent className="p-6">
-          <p className="text-center text-muted-foreground">没有找到本体</p>
+          <p className="text-center text-muted-foreground">正在加载本体...</p>
         </CardContent>
       </Card>
     )
   }
 
   if (editingAttributesFor) {
-    const isEntityType = workingOntology.entity_types.includes(editingAttributesFor)
+    // Use editingAttributeType to determine whether editing entity or relation attributes
+    const isEntityType = editingAttributeType === 'entity'
     const attributes = isEntityType
       ? workingOntology.entity_attributes[editingAttributesFor] || {}
       : workingOntology.relation_attributes[editingAttributesFor] || {}
@@ -288,6 +465,14 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
   return (
     <div className="space-y-6">
+      {/* Import Dialog */}
+      <OntologyImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onImport={handleImportOntology}
+        isImporting={isImporting}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -306,13 +491,21 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
             <Eye className="w-4 h-4 mr-2" />
             {isValidating ? '验证中...' : '验证'}
           </Button>
+          <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
+            <Upload className="w-4 h-4 mr-2" />
+            {isImporting ? '导入中...' : '导入'}
+          </Button>
           <Button variant="outline" onClick={handleExport}>
             <Download className="w-4 h-4 mr-2" />
             导出
           </Button>
-          <Button onClick={handleSave} disabled={!hasChanges}>
+          <Button variant="outline" onClick={handleClearOntology} disabled={isClearing} className="text-destructive hover:text-destructive">
+            <Trash2 className="w-4 h-4 mr-2" />
+            {isClearing ? '清除中...' : '清除'}
+          </Button>
+          <Button onClick={handleSave} disabled={!hasChanges || isSaving}>
             <Save className="w-4 h-4 mr-2" />
-            保存
+            {isSaving ? '保存中...' : '保存'}
           </Button>
         </div>
       </div>

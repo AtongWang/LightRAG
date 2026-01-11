@@ -20,8 +20,8 @@ export interface OntologySpec {
   language: 'zh' | 'en'
   entity_types: string[]
   relation_types: string[]
-  entity_attributes: Record<string, AttributeDefinition>
-  relation_attributes: Record<string, AttributeDefinition>
+  entity_attributes: Record<string, Record<string, AttributeDefinition>>
+  relation_attributes: Record<string, Record<string, AttributeDefinition>>
   normalization_rules?: Record<string, any>
   created_at: string
   updated_at: string
@@ -34,8 +34,8 @@ export interface CreateOntologyDto {
   language: 'zh' | 'en'
   entity_types: string[]
   relation_types: string[]
-  entity_attributes: Record<string, AttributeDefinition>
-  relation_attributes: Record<string, AttributeDefinition>
+  entity_attributes: Record<string, Record<string, AttributeDefinition>>
+  relation_attributes: Record<string, Record<string, AttributeDefinition>>
   normalization_rules?: Record<string, any>
 }
 
@@ -44,8 +44,8 @@ export interface UpdateOntologyDto {
   description?: string
   entity_types?: string[]
   relation_types?: string[]
-  entity_attributes?: Record<string, AttributeDefinition>
-  relation_attributes?: Record<string, AttributeDefinition>
+  entity_attributes?: Record<string, Record<string, AttributeDefinition>>
+  relation_attributes?: Record<string, Record<string, AttributeDefinition>>
   normalization_rules?: Record<string, any>
 }
 

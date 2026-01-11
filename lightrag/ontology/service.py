@@ -23,8 +23,13 @@ class OntologyService:
         self._cache_ttl: int = 3600  # 1 小时
         self.prompt_injector = OntologyPromptInjector()
 
-    async def create(self, spec: OntologySpec) -> OntologySpec:
-        """创建本体"""
+    async def create(self, spec: OntologySpec, force: bool = False) -> OntologySpec:
+        """创建本体
+        
+        Args:
+            spec: 本体规格
+            force: 如果为 True，则覆盖已有本体
+        """
         # 验证
         result = OntologyValidator.validate(spec)
         if not result.is_valid:
@@ -34,7 +39,12 @@ class OntologyService:
         current_key = f"onto_{spec.project_id}"
         existing_data = await self.kv.get_by_id(current_key)
         if existing_data is not None:
-            raise ValueError(f"项目 {spec.project_id} 已有本体，请使用 update")
+            if not force:
+                raise ValueError(f"项目 {spec.project_id} 已有本体，请使用 update")
+            # Force mode: delete existing ontology first
+            existing_spec = OntologySpec(**existing_data.get("spec", {}))
+            await self.kv.delete([current_key, f"ontology_{existing_spec.ontology_id}"])
+            logger.info(f"覆盖现有本体: {existing_spec.ontology_id}")
 
         # 准备存储数据
         ontology_data = {
@@ -132,21 +142,38 @@ class OntologyService:
 
         return spec
 
-    async def delete(self, project_id: str):
-        """删除项目本体"""
-        # 先获取本体以便删除 ontology_id 键
-        ontology = await self.get_by_project(project_id)
-        keys_to_delete = [f"onto_{project_id}"]
-
+    async def delete(self, identifier: str):
+        """删除本体
+        
+        Args:
+            identifier: 可以是 project_id 或 ontology_id
+        """
+        # 先尝试按 ontology_id 获取
+        ontology = await self.get(identifier)
+        
         if ontology:
-            keys_to_delete.append(f"ontology_{ontology.ontology_id}")
-
-        await self.kv.delete(keys_to_delete)
-
-        # 清除缓存
-        self._cache.pop(project_id, None)
-
-        logger.info(f"删除本体: 项目={project_id}")
+            # 找到了，按 ontology_id 删除
+            project_id = ontology.project_id
+            keys_to_delete = [
+                f"onto_{project_id}",
+                f"ontology_{ontology.ontology_id}"
+            ]
+            await self.kv.delete(keys_to_delete)
+            # 清除缓存
+            self._cache.pop(project_id, None)
+            logger.info(f"删除本体: ontology_id={ontology.ontology_id}, project_id={project_id}")
+        else:
+            # 尝试按 project_id 删除
+            ontology = await self.get_by_project(identifier)
+            keys_to_delete = [f"onto_{identifier}"]
+            
+            if ontology:
+                keys_to_delete.append(f"ontology_{ontology.ontology_id}")
+            
+            await self.kv.delete(keys_to_delete)
+            # 清除缓存
+            self._cache.pop(identifier, None)
+            logger.info(f"删除本体: project_id={identifier}")
 
     async def inject_into_prompt(
         self,

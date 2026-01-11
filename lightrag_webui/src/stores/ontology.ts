@@ -53,7 +53,18 @@ export const useOntologyStore = create<OntologyStore>()(
             currentOntology: ontology,
             loading: false
           }))
-        } catch (error) {
+        } catch (error: unknown) {
+          // Check if this is a 404 error (no ontology for project)
+          const axiosError = error as { response?: { status?: number } }
+          if (axiosError.response?.status === 404) {
+            // This is not an error - project just doesn't have an ontology yet
+            set({
+              currentOntology: null,
+              loading: false,
+              error: null
+            })
+            return // Don't throw, this is expected
+          }
           set({
             error: error instanceof Error ? error.message : '获取本体失败',
             loading: false

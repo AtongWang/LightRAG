@@ -1,0 +1,155 @@
+{
+  "name": "医疗健康知识图谱",
+  "description": "用于医疗健康领域的知识抽取和分析",
+  "language": "zh",
+  "entity_types": [
+    "Disease",
+    "Symptom",
+    "Drug",
+    "Treatment",
+    "Doctor",
+    "Hospital",
+    "BodyPart",
+    "MedicalTest",
+    "Other"
+  ],
+  "relation_types": [
+    "治疗",
+    "引起",
+    "表现为",
+    "检查",
+    "禁忌",
+    "适用于",
+    "属于",
+    "就职于",
+    "Other"
+  ],
+  "entity_attributes": {
+    "Disease": {
+      "icd_code": {
+        "type": "string",
+        "required": false,
+        "description": "ICD疾病编码"
+      },
+      "category": {
+        "type": "string",
+        "required": false,
+        "description": "疾病分类"
+      },
+      "severity": {
+        "type": "string",
+        "required": false,
+        "description": "严重程度",
+        "enum_values": ["轻度", "中度", "重度"]
+      }
+    },
+    "Drug": {
+      "generic_name": {
+        "type": "string",
+        "required": false,
+        "description": "通用名"
+      },
+      "dosage_form": {
+        "type": "string",
+        "required": false,
+        "description": "剂型",
+        "enum_values": ["片剂", "胶囊", "注射液", "口服液", "外用"]
+      },
+      "manufacturer": {
+        "type": "string",
+        "required": false,
+        "description": "生产厂家"
+      },
+      "approval_number": {
+        "type": "string",
+        "required": false,
+        "description": "批准文号"
+      }
+    },
+    "Symptom": {
+      "body_part": {
+        "type": "string",
+        "required": false,
+        "description": "涉及部位"
+      },
+      "severity": {
+        "type": "string",
+        "required": false,
+        "description": "症状程度",
+        "enum_values": ["轻微", "中等", "严重"]
+      }
+    },
+    "Doctor": {
+      "specialty": {
+        "type": "string",
+        "required": false,
+        "description": "专业领域"
+      },
+      "title": {
+        "type": "string",
+        "required": false,
+        "description": "职称",
+        "enum_values": ["主任医师", "副主任医师", "主治医师", "住院医师"]
+      }
+    },
+    "Hospital": {
+      "level": {
+        "type": "string",
+        "required": false,
+        "description": "医院等级",
+        "enum_values": ["三甲", "三乙", "二甲", "二乙", "一级"]
+      },
+      "type": {
+        "type": "string",
+        "required": false,
+        "description": "医院类型",
+        "enum_values": ["综合医院", "专科医院", "社区医院"]
+      }
+    },
+    "MedicalTest": {
+      "normal_range": {
+        "type": "string",
+        "required": false,
+        "description": "正常范围"
+      },
+      "unit": {
+        "type": "string",
+        "required": false,
+        "description": "单位"
+      }
+    }
+  },
+  "relation_attributes": {
+    "治疗": {
+      "efficacy": {
+        "type": "string",
+        "required": false,
+        "description": "疗效",
+        "enum_values": ["特效", "有效", "辅助"]
+      },
+      "evidence_level": {
+        "type": "string",
+        "required": false,
+        "description": "证据等级",
+        "enum_values": ["A级", "B级", "C级"]
+      }
+    },
+    "禁忌": {
+      "reason": {
+        "type": "string",
+        "required": false,
+        "description": "禁忌原因"
+      },
+      "severity": {
+        "type": "string",
+        "required": false,
+        "description": "禁忌程度",
+        "enum_values": ["绝对禁忌", "相对禁忌", "慎用"]
+      }
+    }
+  },
+  "normalization_rules": {
+    "case_sensitive": false,
+    "trim_whitespace": true
+  }
+}

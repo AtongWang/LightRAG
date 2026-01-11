@@ -1,74 +1,161 @@
 {
-  "ontology_id": "onto_demo_001",
-  "project_id": "proj_demo_001",
-  "version": "1.0.0",
-  "language": "zh-cn",
+  "name": "文化遗产知识图谱本体",
+  "description": "用于文化遗产领域的知识抽取本体规范，定义了核心实体类型和关系类型",
+  "language": "zh",
   "entity_types": [
-    "人物",
-    "机构",
-    "地点",
-    "论文",
-    "数据集",
-    "方法",
-    "模型",
-    "任务",
-    "指标",
-    "设备",
-    "图像",
-    "表格",
-    "公式",
+    "Person",
+    "Organization",
+    "Location",
+    "Event",
+    "Artifact",
+    "Concept",
+    "TimePeriod",
     "Other"
   ],
   "relation_types": [
-    "隶属",
-    "提出",
-    "使用",
-    "评测",
-    "对比",
-    "包含",
-    "引用",
-    "生成",
+    "创作",
+    "属于",
     "位于",
-    "描述",
+    "发生于",
+    "关联",
+    "影响",
+    "继承",
+    "包含",
     "Other"
   ],
   "entity_attributes": {
-    "人物": {
-      "affiliations": {"type": "string[]", "required": false, "desc": "人物所属机构（可多值）"},
-      "roles": {"type": "string[]", "required": false, "desc": "人物角色：作者/导师/负责人等"},
-      "orcid": {"type": "string", "required": false, "desc": "ORCID（若文本明确出现）"}
+    "Person": {
+      "birth_date": {
+        "type": "date",
+        "required": false,
+        "description": "出生日期"
+      },
+      "death_date": {
+        "type": "date",
+        "required": false,
+        "description": "逝世日期"
+      },
+      "nationality": {
+        "type": "string",
+        "required": false,
+        "description": "国籍"
+      },
+      "occupation": {
+        "type": "string",
+        "required": false,
+        "description": "职业",
+        "enum_values": ["艺术家", "政治家", "学者", "工匠", "其他"]
+      }
     },
-    "论文": {
-      "title": {"type": "string", "required": false, "desc": "论文标题"},
-      "year": {"type": "int", "required": false, "desc": "发表年份"},
-      "venue": {"type": "string", "required": false, "desc": "发表会议/期刊"},
-      "doi": {"type": "string", "required": false, "desc": "DOI（若文本明确出现）"}
+    "Artifact": {
+      "creation_date": {
+        "type": "date",
+        "required": false,
+        "description": "创作/制作日期"
+      },
+      "material": {
+        "type": "string",
+        "required": false,
+        "description": "材质"
+      },
+      "dimensions": {
+        "type": "string",
+        "required": false,
+        "description": "尺寸规格"
+      },
+      "current_location": {
+        "type": "string",
+        "required": false,
+        "description": "现藏地点"
+      }
     },
-    "数据集": {
-      "name": {"type": "string", "required": false, "desc": "数据集名称"},
-      "domain": {"type": "string", "required": false, "desc": "领域/任务"},
-      "license": {"type": "string", "required": false, "desc": "许可证"}
+    "Location": {
+      "coordinates": {
+        "type": "string",
+        "required": false,
+        "description": "地理坐标"
+      },
+      "address": {
+        "type": "string",
+        "required": false,
+        "description": "详细地址"
+      }
     },
-    "图像": {
-      "page": {"type": "int", "required": false, "desc": "来源页码（来自 MinerU 映射）"},
-      "bbox": {"type": "number[4]", "required": false, "desc": "页面坐标 bbox（若有）"},
-      "caption": {"type": "string", "required": false, "desc": "图注"}
+    "Event": {
+      "start_date": {
+        "type": "date",
+        "required": false,
+        "description": "开始日期"
+      },
+      "end_date": {
+        "type": "date",
+        "required": false,
+        "description": "结束日期"
+      },
+      "significance": {
+        "type": "string",
+        "required": false,
+        "description": "历史意义"
+      }
+    },
+    "TimePeriod": {
+      "start_year": {
+        "type": "number",
+        "required": false,
+        "description": "起始年份",
+        "min_value": -5000,
+        "max_value": 2100
+      },
+      "end_year": {
+        "type": "number",
+        "required": false,
+        "description": "结束年份",
+        "min_value": -5000,
+        "max_value": 2100
+      },
+      "dynasty": {
+        "type": "string",
+        "required": false,
+        "description": "朝代/时代"
+      }
     }
   },
   "relation_attributes": {
-    "提出": {
-      "evidence_level": {"type": "string", "required": false, "desc": "证据强度：明确/推断/弱"}
+    "创作": {
+      "role": {
+        "type": "string",
+        "required": false,
+        "description": "创作角色",
+        "enum_values": ["主创", "协作", "指导", "赞助"]
+      }
     },
-    "评测": {
-      "metric": {"type": "string", "required": false, "desc": "指标名称"},
-      "value": {"type": "string", "required": false, "desc": "指标值"}
+    "属于": {
+      "membership_type": {
+        "type": "string",
+        "required": false,
+        "description": "隶属类型",
+        "enum_values": ["正式成员", "创始人", "荣誉成员"]
+      }
+    },
+    "影响": {
+      "influence_type": {
+        "type": "string",
+        "required": false,
+        "description": "影响类型",
+        "enum_values": ["直接影响", "间接影响", "风格继承"]
+      },
+      "influence_strength": {
+        "type": "string",
+        "required": false,
+        "description": "影响程度",
+        "enum_values": ["强", "中", "弱"]
+      }
     }
   },
   "normalization_rules": {
-    "alias": {
-      "BERT-base": ["bert base", "BERT Base"],
-      "图神经网络": ["GNN", "Graph Neural Network"]
-    },
-    "blacklist_entities": ["本研究", "本文", "我们"]
+    "case_sensitive": false,
+    "trim_whitespace": true,
+    "merge_similar_entities": true,
+    "similarity_threshold": 0.85
   }
 }

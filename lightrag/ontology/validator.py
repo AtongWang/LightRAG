@@ -37,7 +37,7 @@ class OntologyValidator:
     @staticmethod
     def validate_attributes_schema(schema: Dict) -> ValidationResult:
         """验证属性 schema"""
-        valid_types = {"string", "string[]", "int", "float", "number[4]", "bool"}
+        valid_types = {"string", "string[]", "int", "float", "number[4]", "bool", "number", "boolean", "date", "image", "array"}
         for entity_type, attrs in schema.items():
             if not isinstance(attrs, dict):
                 return ValidationResult(False, f"{entity_type} 的属性必须是字典")
@@ -49,7 +49,8 @@ class OntologyValidator:
                     return ValidationResult(False, f"{entity_type}.{attr_name} 无效的 type: {attr_def['type']}")
                 if "required" not in attr_def:
                     return ValidationResult(False, f"{entity_type}.{attr_name} 缺少 required 定义")
-                if "desc" not in attr_def:
+                # Accept both 'desc' and 'description' as valid field names
+                if "desc" not in attr_def and "description" not in attr_def:
                     return ValidationResult(False, f"{entity_type}.{attr_name} 缺少 desc 定义")
 
         return ValidationResult(True)
