@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { X, Plus, Sparkles, Image as ImageIcon } from 'lucide-react'
 import { useGraphStore, RawNodeType } from '@/stores/graph'
+import { useEnrichmentStore } from '@/stores'
 import { checkEntityNameExists } from '@/api/lightrag'
 import Text from '@/components/ui/Text'
 import Button from '@/components/ui/Button'
@@ -22,6 +23,10 @@ interface NodePropertiesPanelProps {
    * Enable AI enrichment features
    */
   enableAIEnrichment?: boolean
+  /**
+   * Ontology ID for enrichment
+   */
+  ontologyId?: string
 }
 
 /**
@@ -37,13 +42,14 @@ interface NodePropertiesPanelProps {
 const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
   node,
   onClose,
-  enableAIEnrichment = false
+  enableAIEnrichment = false,
+  ontologyId
 }) => {
   const { t } = useTranslation()
+  const { enrichEntity, loading: enriching } = useEnrichmentStore()
   const [isAddingProperty, setIsAddingProperty] = useState(false)
   const [newPropertyName, setNewPropertyName] = useState('')
   const [newPropertyValue, setNewPropertyValue] = useState('')
-  const [isEnriching, setIsEnriching] = useState(false)
   const graphDataVersion = useGraphStore.use.graphDataVersion()
 
   // Extract image URLs from properties
@@ -90,21 +96,48 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
   const handleAIEnrich = async () => {
     if (!enableAIEnrichment) return
 
-    setIsEnriching(true)
     try {
-      // TODO: Implement AI enrichment API call
-      const entityId = node.properties['entity_id'] || node.id
-      // await enrichEntity(entityId)
+      // Get entity name from node properties
+      const entityName = node.properties['entity_name'] || node.labels[0] || String(node.id)
 
-      toast.success(t('graphPanel.propertiesView.success.aiEnrichment', 'AI enrichment completed'))
+      // Call enrichment API
+      const result = await enrichEntity({
+        entity_name: entityName,
+        ontology_id: ontologyId
+      })
 
-      // Trigger refresh
-      useGraphStore.getState().incrementGraphDataVersion()
+      if (result.status === 'completed' && result.enriched_data) {
+        toast.success(t('graphPanel.propertiesView.success.aiEnrichment', 'AI enrichment completed'))
+
+        // Update local node properties with enriched data
+        const graphStore = useGraphStore.getState()
+        const updatedNodes = graphStore.graphData.nodes.map(n => {
+          if (n.id === node.id) {
+            return {
+              ...n,
+              properties: {
+                ...n.properties,
+                ...result.enriched_data.attributes,
+                description: result.enriched_data.description || n.properties.description
+              }
+            }
+          }
+          return n
+        })
+
+        graphStore.setGraphData({
+          nodes: updatedNodes,
+          edges: graphStore.graphData.edges
+        })
+
+        // Trigger refresh
+        graphStore.incrementGraphDataVersion()
+      } else if (result.status === 'failed') {
+        toast.error(result.error_message || t('graphPanel.propertiesView.errors.aiEnrichmentFailed', 'AI enrichment failed'))
+      }
     } catch (error) {
       console.error('Error during AI enrichment:', error)
       toast.error(t('graphPanel.propertiesView.errors.aiEnrichmentFailed', 'AI enrichment failed'))
-    } finally {
-      setIsEnriching(false)
     }
   }
 
@@ -256,10 +289,10 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
             variant="default"
             className="w-full"
             onClick={handleAIEnrich}
-            disabled={isEnriching}
+            disabled={enriching}
           >
             <Sparkles className="h-4 w-4 mr-2" />
-            {isEnriching
+            {enriching
               ? t('graphPanel.propertiesView.node.enriching', 'Enriching...')
               : t('graphPanel.propertiesView.node.aiEnrich', 'AI Enrichment')
             }

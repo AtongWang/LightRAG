@@ -34,12 +34,19 @@ export function ProjectsList() {
 
   const handleDeleteProject = async (project: Project) => {
     if (confirm(`确定要删除项目 "${project.name}" 吗？此操作不可恢复。`)) {
-      await deleteProject(project.project_id)
+      try {
+        await deleteProject(project.project_id)
+        // 刷新项目列表
+        await fetchProjects()
+      } catch (error) {
+        console.error('删除项目失败:', error)
+        alert('删除项目失败，请重试')
+      }
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
+    <div className="min-h-screen max-h-screen overflow-y-auto bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
       {/* 背景装饰 */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         {/* 左上角云纹 */}
@@ -276,30 +283,65 @@ function ProjectCard({
     archived: 'bg-muted text-muted-foreground border-border'
   }
 
+  const hasCoverImage = !!project.cover_image
+
   return (
     <div
-      className="group relative bg-white dark:bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] overflow-hidden cursor-pointer hover:shadow-xl hover:shadow-[hsl(var(--vermillion)/0.1)] hover:-translate-y-1 transition-all duration-300 animate-fade-in-up"
+      className="group relative rounded-2xl border border-[hsl(var(--border))] overflow-hidden cursor-pointer hover:shadow-xl hover:shadow-[hsl(var(--vermillion)/0.1)] hover:-translate-y-1 transition-all duration-300 animate-fade-in-up"
       onClick={onClick}
       style={style}
     >
+      {/* 封面图片背景 */}
+      {hasCoverImage && (
+        <div className="absolute inset-0">
+          <img
+            src={project.cover_image}
+            alt={project.name}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+          />
+          {/* 渐变遮罩 - 让文字更清晰 */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/20" />
+        </div>
+      )}
+
+      {/* 无封面时的默认背景 */}
+      {!hasCoverImage && (
+        <div className="absolute inset-0 bg-white dark:bg-[hsl(var(--card))]" />
+      )}
+
       {/* 顶部装饰条 */}
-      <div className="h-1.5 bg-gradient-to-r from-[hsl(var(--vermillion))] via-[hsl(var(--gold))] to-[hsl(var(--jade))]" />
+      <div className="relative h-1.5 bg-gradient-to-r from-[hsl(var(--vermillion))] via-[hsl(var(--gold))] to-[hsl(var(--jade))]" />
       
       {/* 内容区域 */}
-      <div className="p-6">
+      <div className={cn("relative p-6", hasCoverImage && "text-white")}>
         {/* 头部 */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[hsl(var(--vermillion)/0.1)] to-[hsl(var(--vermillion)/0.05)] flex items-center justify-center">
-              <Scroll className="w-5 h-5 text-[hsl(var(--vermillion))]" />
+            <div className={cn(
+              "w-10 h-10 rounded-xl flex items-center justify-center",
+              hasCoverImage
+                ? "bg-white/20 backdrop-blur-sm"
+                : "bg-gradient-to-br from-[hsl(var(--vermillion)/0.1)] to-[hsl(var(--vermillion)/0.05)]"
+            )}>
+              <Scroll className={cn("w-5 h-5", hasCoverImage ? "text-white" : "text-[hsl(var(--vermillion))]")} />
             </div>
             <div>
-              <h3 className="font-bold text-lg text-foreground group-hover:text-[hsl(var(--vermillion))] transition-colors line-clamp-1">
+              <h3 className={cn(
+                "font-bold text-lg line-clamp-1 transition-colors",
+                hasCoverImage
+                  ? "text-white group-hover:text-[hsl(var(--gold))]"
+                  : "text-foreground group-hover:text-[hsl(var(--vermillion))]"
+              )}>
                 {project.name}
               </h3>
               <span className={cn(
                 "inline-flex items-center px-2 py-0.5 text-xs rounded-full border",
-                statusColors[project.status || 'active']
+                hasCoverImage
+                  ? "bg-white/20 text-white border-white/30 backdrop-blur-sm"
+                  : statusColors[project.status || 'active']
               )}>
                 {project.status === 'active' ? '活跃' : '已归档'}
               </span>
@@ -310,40 +352,79 @@ function ProjectCard({
           <button
             onClick={(e) => {
               e.stopPropagation()
+              e.preventDefault()
               onDelete()
             }}
-            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-500 transition-all"
+            className={cn(
+              "opacity-0 group-hover:opacity-100 p-2 rounded-lg transition-all",
+              hasCoverImage
+                ? "hover:bg-white/20 text-white/70 hover:text-white"
+                : "hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-500"
+            )}
           >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
 
         {/* 描述 */}
-        <p className="text-sm text-muted-foreground line-clamp-2 mb-4 min-h-[2.5rem]">
+        <p className={cn(
+          "text-sm line-clamp-2 mb-4 min-h-[2.5rem]",
+          hasCoverImage ? "text-white/80" : "text-muted-foreground"
+        )}>
           {project.description || '暂无描述'}
         </p>
 
+        {/* 标签 */}
+        {project.tags && project.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {project.tags.slice(0, 3).map(tag => (
+              <span
+                key={tag}
+                className={cn(
+                  "px-2 py-0.5 text-xs rounded-full",
+                  hasCoverImage
+                    ? "bg-white/20 text-white backdrop-blur-sm"
+                    : "bg-[hsl(var(--vermillion)/0.1)] text-[hsl(var(--vermillion-dark))]"
+                )}
+              >
+                {tag}
+              </span>
+            ))}
+            {project.tags.length > 3 && (
+              <span className={cn(
+                "px-2 py-0.5 text-xs rounded-full",
+                hasCoverImage
+                  ? "bg-white/20 text-white backdrop-blur-sm"
+                  : "bg-muted text-muted-foreground"
+              )}>
+                +{project.tags.length - 3}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* 统计数据 */}
-        <div className="flex items-center gap-4 pt-4 border-t border-[hsl(var(--border))]">
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Network className="w-4 h-4 text-[hsl(var(--jade))]" />
+        <div className={cn(
+          "flex items-center gap-4 pt-4 border-t",
+          hasCoverImage ? "border-white/20" : "border-[hsl(var(--border))]"
+        )}>
+          <div className={cn(
+            "flex items-center gap-1.5 text-sm",
+            hasCoverImage ? "text-white/80" : "text-muted-foreground"
+          )}>
+            <Network className={cn("w-4 h-4", hasCoverImage ? "text-white/60" : "text-[hsl(var(--jade))]")} />
             <span>{project.stats?.entity_count || 0}</span>
             <span className="text-xs">实体</span>
           </div>
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <FileText className="w-4 h-4 text-[hsl(var(--gold-dark))]" />
+          <div className={cn(
+            "flex items-center gap-1.5 text-sm",
+            hasCoverImage ? "text-white/80" : "text-muted-foreground"
+          )}>
+            <FileText className={cn("w-4 h-4", hasCoverImage ? "text-white/60" : "text-[hsl(var(--gold-dark))]")} />
             <span>{project.stats?.document_count || 0}</span>
             <span className="text-xs">文档</span>
           </div>
         </div>
-      </div>
-
-      {/* 悬浮装饰 */}
-      <div className="absolute top-4 right-4 w-16 h-16 opacity-0 group-hover:opacity-10 transition-opacity">
-        <svg viewBox="0 0 100 100" className="w-full h-full text-[hsl(var(--vermillion))]">
-          <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="1" />
-          <circle cx="50" cy="50" r="30" fill="none" stroke="currentColor" strokeWidth="1" />
-        </svg>
       </div>
     </div>
   )
@@ -408,6 +489,7 @@ function ProjectListItem({
       <button
         onClick={(e) => {
           e.stopPropagation()
+          e.preventDefault()
           onDelete()
         }}
         className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-500 transition-all flex-shrink-0"

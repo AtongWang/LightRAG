@@ -16,6 +16,10 @@ class EnrichEntityRequest(BaseModel):
     """丰富单个实体请求"""
     entity_name: str = Field(..., description="实体名称")
     ontology_id: Optional[str] = Field(None, description="本体 ID（可选）")
+    attribute_name: Optional[str] = Field(None, description="要丰富的属性名称（可选，不指定则丰富所有属性）")
+    prompt: Optional[str] = Field(None, description="自定义提示词（可选）")
+    model: Optional[str] = Field("llm", description="模型类型：llm 或 vllm（默认llm）")
+    image_url: Optional[str] = Field(None, description="图片URL（用于VLLM模型）")
 
 
 class EnrichEntitiesRequest(BaseModel):
@@ -56,14 +60,43 @@ def create_enrichment_router(rag: LightRAG, api_key: str) -> APIRouter:
     async def enrich_entity(request: EnrichEntityRequest):
         """丰富单个实体
 
-        使用 LLM 基于本体信息丰富单个实体的属性和描述。
+        使用 LLM/VLLM 基于本体信息丰富单个实体的属性和描述。
         这是一个同步操作，会立即返回结果。
+
+        支持的参数：
+        - entity_name: 实体名称（必需）
+        - ontology_id: 本体ID（可选）
+        - attribute_name: 要丰富的属性名称（可选）
+        - prompt: 自定义提示词（可选）
+        - model: 模型类型，llm或vllm（默认llm）
+        - image_url: 图片URL（用于VLLM）
         """
         try:
-            result = await rag.aenrich_entity(
-                entity_name=request.entity_name,
-                ontology_id=request.ontology_id
-            )
+            # 根据模型类型选择方法
+            if request.model == "vllm" and request.image_url:
+                # 使用VLLM方法
+                result = await rag.aenrich_entity_with_vllm(
+                    entity_name=request.entity_name,
+                    ontology_id=request.ontology_id,
+                    attribute_name=request.attribute_name,
+                    prompt=request.prompt,
+                    image_url=request.image_url
+                )
+            else:
+                # 使用标准LLM方法
+                # 构建kwargs传递额外参数
+                kwargs = {
+                    "entity_name": request.entity_name,
+                    "ontology_id": request.ontology_id
+                }
+
+                # 添加可选参数
+                if request.attribute_name:
+                    kwargs["attribute_name"] = request.attribute_name
+                if request.prompt:
+                    kwargs["prompt"] = request.prompt
+
+                result = await rag.aenrich_entity(**kwargs)
 
             return result
 

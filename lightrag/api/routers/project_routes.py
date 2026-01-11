@@ -17,12 +17,16 @@ class CreateProjectRequest(BaseModel):
     """创建项目请求"""
     name: str = Field(..., description="项目名称")
     description: str = Field(default="", description="项目描述")
+    cover_image: Optional[str] = Field(None, description="封面图片URL")
+    tags: Optional[List[str]] = Field(default_factory=list, description="标签列表")
 
 
 class UpdateProjectRequest(BaseModel):
     """更新项目请求"""
     name: Optional[str] = Field(None, description="项目名称")
     description: Optional[str] = Field(None, description="项目描述")
+    cover_image: Optional[str] = Field(None, description="封面图片URL")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
 
 
 class ProjectResponse(BaseModel):
@@ -35,6 +39,8 @@ class ProjectResponse(BaseModel):
     created_at: str
     updated_at: str
     status: str
+    cover_image: Optional[str] = None
+    tags: List[str] = []
 
 
 def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
@@ -72,6 +78,8 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
             project = await project_manager.create(
                 name=request.name,
                 description=request.description,
+                cover_image=request.cover_image,
+                tags=request.tags or [],
             )
 
             return ProjectResponse(**project.to_dict())
@@ -142,27 +150,23 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
             kv_storage = rag.llm_response_cache
             project_manager = ProjectManager(kv_storage)
 
-            # 获取现有项目
-            project = await project_manager.get(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-
-            # 更新字段
+            # 使用新的update方法
+            update_data = {}
             if request.name is not None:
-                project.name = request.name
+                update_data['name'] = request.name
             if request.description is not None:
-                project.description = request.description
+                update_data['description'] = request.description
+            if request.cover_image is not None:
+                update_data['cover_image'] = request.cover_image
+            if request.tags is not None:
+                update_data['tags'] = request.tags
 
-            # 保存更新（通过删除后重新创建，因为 ProjectManager 没有 update 方法）
-            await project_manager.delete(project_id)
-            # 注意：这里需要重新创建项目，但保留原有的 ontology_id 和 workspace
-            # 由于 ProjectManager 没有 update 方法，这是临时的解决方案
-            # 实际使用中可能需要添加 ProjectManager.update() 方法
+            project = await project_manager.update(project_id, **update_data)
 
             return ProjectResponse(**project.to_dict())
 
-        except HTTPException:
-            raise
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 

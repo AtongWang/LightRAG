@@ -204,11 +204,20 @@ export const enrichEntitiesInBackground = async (
 /**
  * 获取项目图谱数据
  */
-export const getProjectGraph = async (projectId: string): Promise<{
+export const getProjectGraph = async (projectId: string, options?: {
+  maxDepth?: number
+  maxNodes?: number
+}): Promise<{
   nodes: any[]
   edges: any[]
 }> => {
-  const response = await api.get(`/graphs/${projectId}`)
+  const params = new URLSearchParams()
+  if (options?.maxDepth) params.set('max_depth', String(options.maxDepth))
+  if (options?.maxNodes) params.set('max_nodes', String(options.maxNodes))
+
+  const queryString = params.toString()
+  const url = `/graphs/project/${projectId}${queryString ? `?${queryString}` : ''}`
+  const response = await api.get(url)
   return response.data
 }
 

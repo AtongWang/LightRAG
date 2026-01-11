@@ -3,8 +3,8 @@
 定义 Project 数据结构。
 """
 
-from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any
+from dataclasses import dataclass, asdict, field
+from typing import Optional, Dict, Any, List
 
 
 @dataclass
@@ -18,6 +18,8 @@ class Project:
     created_at: str
     updated_at: str
     status: str  # 'active' | 'archived' | 'deleted'
+    cover_image: Optional[str] = None  # 封面图片URL
+    tags: List[str] = field(default_factory=list)  # 标签列表
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

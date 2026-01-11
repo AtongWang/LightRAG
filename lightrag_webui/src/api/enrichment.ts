@@ -1,72 +1,27 @@
-import axios from 'axios'
-import { backendBaseUrl } from '@/lib/constants'
-import {
-  EnrichmentRequest,
-  BatchEnrichmentRequest,
-  EnrichmentResult,
-  BatchEnrichmentResult,
-  EnrichmentStatusResponse,
-  GenerationResult
-} from '@/types/enrichment'
-
 /**
- * Enrichment API 客户端
+ * Enrichment API wrapper
+ *
+ * This file provides wrapper functions for the enrichment API that work with
+ * the AttributeEditDialog component. It uses the meme-lab API client for
+ * proper authentication and endpoint handling.
  */
-export const enrichmentApi = {
-  /**
-   * 丰富单个实体（同步）
-   */
-  async enrichEntity(request: EnrichmentRequest): Promise<EnrichmentResult> {
-    const response = await axios.post(
-      `${backendBaseUrl}/api/enrichment/entity`,
-      request
-    )
-    return response.data
-  },
 
-  /**
-   * 批量丰富实体（同步）
-   */
-  async enrichEntities(request: BatchEnrichmentRequest): Promise<BatchEnrichmentResult> {
-    const response = await axios.post(
-      `${backendBaseUrl}/api/enrichment/entities`,
-      request
-    )
-    return response.data
-  },
-
-  /**
-   * 后台丰富单个实体
-   */
-  async enrichEntityBackground(request: EnrichmentRequest): Promise<EnrichmentStatusResponse> {
-    const response = await axios.post(
-      `${backendBaseUrl}/api/enrichment/entity/background`,
-      request
-    )
-    return response.data
-  },
-
-  /**
-   * 后台批量丰富实体
-   */
-  async enrichEntitiesBackground(request: BatchEnrichmentRequest): Promise<EnrichmentStatusResponse> {
-    const response = await axios.post(
-      `${backendBaseUrl}/api/enrichment/entities/background`,
-      request
-    )
-    return response.data
-  }
-}
+import * as api from './meme-lab'
+import type {
+  EnrichmentRequest,
+  GenerationResult,
+  EnrichmentModelType
+} from '@/types/enrichment'
 
 /**
  * 生成属性值（基于模板或自定义提示词）
  *
- * 注意：这个功能需要后端支持。如果后端尚未实现，
- * 需要扩展 enrichment API 或添加新的端点。
+ * This function is used by AttributeEditDialog's onGenerate callback.
+ * It calls the enrichment API with the specified parameters.
  */
 export async function generateAttributeValue(
   entityName: string,
-  modelType: 'llm' | 'vllm',
+  modelType: EnrichmentModelType,
   template?: string,
   customPrompt?: string,
   attributeName?: string,
@@ -74,32 +29,61 @@ export async function generateAttributeValue(
   ontologyId?: string
 ): Promise<GenerationResult> {
   try {
-    // 构建提示词
-    const prompt = customPrompt || template || ''
+    const startTime = Date.now()
 
-    // 调用后端 API
-    // 注意：这里假设后端有一个专门用于生成属性值的端点
-    // 如果后端尚未实现，需要先实现后端功能
-    const response = await axios.post(`${backendBaseUrl}/api/enrichment/generate`, {
+    // Build the enrichment request
+    const request: EnrichmentRequest = {
       entity_name: entityName,
-      model_type: modelType,
-      prompt: prompt,
+      ontology_id: ontologyId,
+      // Use custom prompt or template if provided
+      prompt: customPrompt || template,
+      // Map model_type to the correct API parameter
+      model: modelType,
+      // Specify attribute name if targeting a specific attribute
       attribute_name: attributeName,
-      image_url: imageUrl,
-      ontology_id: ontologyId
-    })
+      // Include image URL for VLLM models
+      image_url: imageUrl
+    }
 
-    return {
-      success: true,
-      attribute_name: attributeName || 'generated_value',
-      value: response.data.value,
-      processing_time: response.data.processing_time
+    // Call the enrichment API (with authentication via meme-lab client)
+    const result = await api.enrichEntity(request)
+
+    const processingTime = (Date.now() - startTime) / 1000
+
+    if (result.status === 'completed' && result.enriched_data) {
+      const { description, attributes } = result.enriched_data
+
+      // If a specific attribute was requested, return its value
+      if (attributeName && attributes?.[attributeName] !== undefined) {
+        return {
+          success: true,
+          attribute_name: attributeName,
+          value: attributes[attributeName],
+          processing_time: processingTime
+        }
+      }
+
+      // Otherwise, return the enriched data (description or all attributes)
+      return {
+        success: true,
+        attribute_name: attributeName || 'enriched_data',
+        value: description || attributes,
+        processing_time: processingTime
+      }
+    } else {
+      return {
+        success: false,
+        attribute_name: attributeName || 'enriched_data',
+        value: null,
+        error: result.error_message || '丰富失败'
+      }
     }
   } catch (error) {
     console.error('Failed to generate attribute value:', error)
     return {
       success: false,
-      attribute_name: attributeName || 'generated_value',
+      attribute_name: attributeName || 'enriched_data',
+      value: null,
       error: error instanceof Error ? error.message : '生成失败'
     }
   }
@@ -108,64 +92,27 @@ export async function generateAttributeValue(
 /**
  * 使用 enrichment API 的包装函数
  *
- * 如果后端只有基本的 enrichment 端点，
- * 可以使用这个函数作为替代方案
+ * This is an alternative function that uses the basic enrichment endpoint.
  */
 export async function generateWithEnrichmentAPI(
   entityName: string,
   ontologyId?: string
 ): Promise<GenerationResult> {
-  try {
-    const startTime = Date.now()
-
-    // 调用现有的 enrichment API
-    const result = await enrichmentApi.enrichEntity({
-      entity_name: entityName,
-      ontology_id: ontologyId
-    })
-
-    const processingTime = (Date.now() - startTime) / 1000
-
-    if (result.status === 'completed' && result.enriched_data) {
-      // 提取生成的描述或属性
-      const { description, attributes } = result.enriched_data
-
-      return {
-        success: true,
-        attribute_name: 'description',
-        value: description || attributes,
-        processing_time: processingTime
-      }
-    } else {
-      return {
-        success: false,
-        attribute_name: 'description',
-        error: result.error_message || '丰富失败'
-      }
-    }
-  } catch (error) {
-    console.error('Failed to generate with enrichment API:', error)
-    return {
-      success: false,
-      attribute_name: 'description',
-      error: error instanceof Error ? error.message : '生成失败'
-    }
-  }
+  return generateAttributeValue(entityName, 'llm', undefined, undefined, undefined, undefined, ontologyId)
 }
 
 /**
  * 更新实体属性
  *
- * 注意：这个功能需要图操作 API 支持
+ * Note: This function requires the entity CRUD API to be implemented.
+ * Uses the entity update endpoint from meme-lab API.
  */
 export async function updateEntityAttributes(
   entityId: string,
   attributes: Record<string, any>
 ): Promise<void> {
   try {
-    await axios.patch(`${backendBaseUrl}/api/graph/nodes/${entityId}`, {
-      attributes
-    })
+    await api.updateNode(entityId, { attributes })
   } catch (error) {
     console.error('Failed to update entity attributes:', error)
     throw error
@@ -174,17 +121,30 @@ export async function updateEntityAttributes(
 
 /**
  * 删除实体属性
+ *
+ * Note: This function requires the entity CRUD API to be implemented.
+ * For now, this function will update the entity with the attribute removed.
  */
 export async function deleteEntityAttribute(
   entityId: string,
   attributeName: string
 ): Promise<void> {
   try {
-    await axios.delete(
-      `${backendBaseUrl}/api/graph/nodes/${entityId}/attributes/${attributeName}`
-    )
+    // Get the current entity data
+    const entity = await api.getNode(entityId)
+
+    // Remove the attribute
+    const { [attributeName]: removed, ...remainingAttributes } = entity.attributes || {}
+
+    // Update the entity with remaining attributes
+    await api.updateNode(entityId, { attributes: remainingAttributes })
   } catch (error) {
     console.error('Failed to delete entity attribute:', error)
     throw error
   }
 }
+
+/**
+ * Re-export the enrichment API for direct use
+ */
+export { api as enrichmentApi }

@@ -55,6 +55,7 @@ from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.ontology_routes import create_ontology_router
 from lightrag.api.routers.project_routes import create_project_router
 from lightrag.api.routers.enrichment_routes import create_enrichment_router
+from lightrag.api.routers.entity_routes import create_entity_router
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -1101,10 +1102,11 @@ def create_app(args):
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
 
-    # Add Ontology, Project, and Enrichment routes
+    # Add Ontology, Project, Enrichment, and Entity routes
     app.include_router(create_ontology_router(rag, api_key))
     app.include_router(create_project_router(rag, api_key))
     app.include_router(create_enrichment_router(rag, api_key))
+    app.include_router(create_entity_router(rag, api_key))
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)

@@ -295,4 +295,88 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.get(
+        "/{ontology_id}/export",
+        dependencies=[Depends(combined_auth)]
+    )
+    async def export_ontology(ontology_id: str):
+        """导出本体
+
+        导出本体规范为 JSON 格式，用于备份或迁移。
+        """
+        try:
+            kv_storage = rag.llm_response_cache
+            ontology_service = OntologyService(kv_storage)
+
+            # 获取本体
+            ontology = await ontology_service.get(ontology_id)
+            if not ontology:
+                raise HTTPException(status_code=404, detail=f"Ontology '{ontology_id}' not found")
+
+            # 返回本体数据（排除一些内部字段）
+            export_data = ontology.to_dict()
+            return export_data
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post(
+        "/import",
+        response_model=OntologyResponse,
+        dependencies=[Depends(combined_auth)]
+    )
+    async def import_ontology(request: CreateOntologyRequest):
+        """导入本体
+
+        从 JSON 数据导入本体规范，用于恢复或迁移。
+        会创建新的本体 ID。
+        """
+        try:
+            kv_storage = rag.llm_response_cache
+            ontology_service = OntologyService(kv_storage)
+
+            # 生成新的 ontology_id
+            import uuid
+            ontology_id = f"onto_{uuid.uuid4().hex[:8]}"
+
+            # 创建 OntologySpec 对象
+            from datetime import datetime
+            from lightrag.ontology.models import OntologySpec
+
+            ontology_spec = OntologySpec(
+                ontology_id=ontology_id,
+                project_id=request.project_id,
+                name=request.name,
+                description=request.description,
+                version="1.0",
+                language=request.language,
+                entity_types=request.entity_types,
+                relation_types=request.relation_types,
+                entity_attributes=request.entity_attributes,
+                relation_attributes=request.relation_attributes,
+                normalization_rules=request.normalization_rules,
+                created_at=datetime.utcnow().isoformat(),
+                updated_at=datetime.utcnow().isoformat(),
+            )
+
+            # 创建本体
+            ontology = await ontology_service.create(ontology_spec)
+
+            # 更新项目的 ontology_id
+            from lightrag.projects import ProjectManager
+            project_manager = ProjectManager(kv_storage)
+            try:
+                await project_manager.set_ontology_id(request.project_id, ontology.ontology_id)
+            except Exception as e:
+                # 项目可能不存在，这不应该阻止本体导入
+                from lightrag.utils import logger
+                logger.warning(f"Could not update project with ontology_id: {e}")
+
+            return OntologyResponse(**ontology.to_dict())
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     return router

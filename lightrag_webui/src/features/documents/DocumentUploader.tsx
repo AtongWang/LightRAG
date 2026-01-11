@@ -6,8 +6,9 @@
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Upload, FileText, X, Image as ImageIcon, AlertCircle, File } from 'lucide-react'
-import { useProjectStore, useUIStore } from '@/stores'
+import { useProjectStore } from '@/stores'
 import { toast } from 'sonner'
+import { uploadDocument } from '@/api/lightrag'
 
 interface UploadFile {
   file: File
@@ -27,18 +28,16 @@ export function DocumentUploader() {
     ))
 
     try {
-      // TODO: 实际的API调用
-      // const formData = new FormData()
-      // formData.append('file', uploadItem.file)
-      // await api.post(`/projects/${currentProject?.project_id}/documents`, formData)
-
-      // 模拟上传进度
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        setFiles(prev => prev.map(f =>
-          f.id === uploadItem.id ? { ...f, progress: i } : f
-        ))
-      }
+      // 使用真实的API上传文件，传递当前项目ID
+      await uploadDocument(
+        uploadItem.file,
+        (progress) => {
+          setFiles(prev => prev.map(f =>
+            f.id === uploadItem.id ? { ...f, progress } : f
+          ))
+        },
+        currentProject?.project_id
+      )
 
       setFiles(prev => prev.map(f =>
         f.id === uploadItem.id ? { ...f, status: 'success' as const, progress: 100 } : f
@@ -46,12 +45,13 @@ export function DocumentUploader() {
 
       toast.success(`${uploadItem.file.name} 上传成功`)
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '上传失败'
       setFiles(prev => prev.map(f =>
-        f.id === uploadItem.id ? { ...f, status: 'error' as const, error: '上传失败' } : f
+        f.id === uploadItem.id ? { ...f, status: 'error' as const, error: errorMsg } : f
       ))
-      toast.error(`${uploadItem.file.name} 上传失败`)
+      toast.error(`${uploadItem.file.name} 上传失败: ${errorMsg}`)
     }
-  }, [])
+  }, [currentProject?.project_id])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (!currentProject) {

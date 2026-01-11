@@ -125,12 +125,18 @@ class EntityEnrichmentService:
         self,
         entity_name: str,
         ontology_id: Optional[str] = None,
+        attribute_name: Optional[str] = None,
+        custom_prompt: Optional[str] = None,
+        image_url: Optional[str] = None,
     ) -> EnrichmentResult:
         """丰富单个实体
 
         Args:
             entity_name: 实体名称
             ontology_id: 本体 ID（可选）
+            attribute_name: 要丰富的属性名称（可选，不指定则丰富所有属性）
+            custom_prompt: 自定义提示词（可选）
+            image_url: 图片URL（用于VLLM视觉模型）
 
         Returns:
             EnrichmentResult: 丰富结果
@@ -153,9 +159,9 @@ class EntityEnrichmentService:
 
             result.original_data = entity_data
 
-            # 2. 检查是否需要丰富
+            # 2. 检查是否需要丰富（如果指定了自定义提示词，则不跳过）
             # 如果实体已有完整的属性和描述，可以跳过
-            if self._should_skip_enrichment(entity_data):
+            if not custom_prompt and self._should_skip_enrichment(entity_data):
                 result.status = EnrichmentStatus.SKIPPED
                 result.enriched_data = entity_data
                 logger.debug(f"Skipping enrichment for entity '{entity_name}': already enriched")
@@ -171,18 +177,31 @@ class EntityEnrichmentService:
                 ontology = await ontology_service.get(ontology_id)
 
             # 4. 构建丰富 Prompt
-            enrichment_prompt = self._build_enrichment_prompt(
-                entity_data, ontology
-            )
+            if custom_prompt:
+                # 使用自定义提示词，替换变量
+                enrichment_prompt = custom_prompt.replace("{entity_name}", entity_name)
+                enrichment_prompt = enrichment_prompt.replace("{entity_type}", entity_data.get("entity_type", "Unknown"))
+                enrichment_prompt = enrichment_prompt.replace("{description}", entity_data.get("description", ""))
+                if attribute_name:
+                    enrichment_prompt = enrichment_prompt.replace("{attribute_name}", attribute_name)
+            else:
+                enrichment_prompt = self._build_enrichment_prompt(
+                    entity_data, ontology, attribute_name
+                )
 
-            # 5. 调用 LLM
+            # 5. 调用 LLM（支持图片URL用于视觉模型）
+            llm_kwargs = {"mode": "enrichment"}
+            if image_url:
+                # 如果有图片URL，添加到LLM调用参数中（视觉模型支持）
+                llm_kwargs["image_url"] = image_url
+
             llm_response = await self.llm_model_func(
                 enrichment_prompt,
-                mode="enrichment"
+                **llm_kwargs
             )
 
             # 6. 解析响应
-            enriched_data = self._parse_enrichment_response(llm_response)
+            enriched_data = self._parse_enrichment_response(llm_response, attribute_name)
 
             # 7. 更新图存储
             await self._update_entity(entity_name, enriched_data)
@@ -190,7 +209,7 @@ class EntityEnrichmentService:
             result.enriched_data = enriched_data
             result.status = EnrichmentStatus.COMPLETED
 
-            logger.info(f"Successfully enriched entity '{entity_name}'")
+            logger.info(f"Successfully enriched entity '{entity_name}'" + (f" attribute '{attribute_name}'" if attribute_name else ""))
 
         except Exception as e:
             result.status = EnrichmentStatus.FAILED
@@ -322,12 +341,14 @@ class EntityEnrichmentService:
         self,
         entity_data: Dict[str, Any],
         ontology: Optional[Any],
+        attribute_name: Optional[str] = None,
     ) -> str:
         """构建丰富 Prompt
 
         Args:
             entity_data: 实体数据
             ontology: 本体对象（可选）
+            attribute_name: 要丰富的特定属性名称（可选）
 
         Returns:
             Prompt 字符串
@@ -354,11 +375,19 @@ class EntityEnrichmentService:
         else:
             context["ontology_guidance"] = ""
 
-        # 使用 Prompt 模板
-        prompt_template = PROMPTS.get(
-            "entity_enrichment_prompt",
-            self.prompts.DEFAULT_ENRICHMENT_PROMPT
-        )
+        # 如果指定了特定属性，使用属性丰富模板
+        if attribute_name:
+            context["attribute_name"] = attribute_name
+            prompt_template = PROMPTS.get(
+                "entity_attribute_enrichment_prompt",
+                self.prompts.DEFAULT_ATTRIBUTE_ENRICHMENT_PROMPT
+            )
+        else:
+            # 使用通用丰富模板
+            prompt_template = PROMPTS.get(
+                "entity_enrichment_prompt",
+                self.prompts.DEFAULT_ENRICHMENT_PROMPT
+            )
 
         return prompt_template.format(**context)
 
@@ -393,11 +422,16 @@ class EntityEnrichmentService:
 
         return "\n".join(lines)
 
-    def _parse_enrichment_response(self, response: str) -> Dict[str, Any]:
+    def _parse_enrichment_response(
+        self,
+        response: str,
+        attribute_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """解析 LLM 响应
 
         Args:
             response: LLM 响应字符串
+            attribute_name: 要丰富的特定属性名称（可选）
 
         Returns:
             解析后的丰富数据
@@ -428,6 +462,12 @@ class EntityEnrichmentService:
 
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse enrichment response as JSON: {e}")
+            # 如果指定了特定属性，返回该属性值
+            if attribute_name:
+                return {
+                    "description": "",
+                    "attributes": {attribute_name: response.strip()}
+                }
             # 返回原始响应作为描述
             return {"description": response, "attributes": {}}
 

@@ -1315,6 +1315,7 @@ class LightRAG:
         ids: list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Pipeline for Processing Documents
@@ -1329,6 +1330,7 @@ class LightRAG:
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated with "enqueue" prefix
+            metadata: Optional metadata dict to attach to all documents (e.g., project_id)
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -1406,6 +1408,7 @@ class LightRAG:
                     "file_path"
                 ],  # Store file path in document status
                 "track_id": track_id,  # Store track_id in document status
+                "metadata": metadata or {},  # Store metadata (e.g., project_id)
             }
             for id_, content_data in contents.items()
         }
@@ -1628,6 +1631,8 @@ class LightRAG:
                     DocStatus.FAILED,
                 ]:
                     # Prepare document for status reset to PENDING
+                    # Preserve original metadata (e.g., project_id) while clearing error messages
+                    existing_metadata = getattr(status_doc, "metadata", {}) or {}
                     docs_to_reset[doc_id] = {
                         "status": DocStatus.PENDING,
                         "content_summary": status_doc.content_summary,
@@ -1636,9 +1641,9 @@ class LightRAG:
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "file_path": getattr(status_doc, "file_path", "unknown_source"),
                         "track_id": getattr(status_doc, "track_id", ""),
-                        # Clear any error messages and processing metadata
+                        # Clear any error messages but preserve project_id and other metadata
                         "error_msg": "",
-                        "metadata": {},
+                        "metadata": {k: v for k, v in existing_metadata.items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
                     }
 
                     # Update the status in to_process_docs as well
@@ -1925,6 +1930,7 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
+                                                **({k: v for k, v in (getattr(status_doc, "metadata", {}) or {}).items() if k not in ["processing_start_time", "processing_end_time", "error_type"]}),
                                                 "processing_start_time": processing_start_time
                                             },
                                         }
@@ -2004,6 +2010,8 @@ class LightRAG:
                             processing_end_time = int(time.time())
 
                             # Update document status to failed
+                            # Preserve original metadata (e.g., project_id)
+                            existing_metadata = getattr(status_doc, "metadata", {}) or {}
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -2018,6 +2026,7 @@ class LightRAG:
                                         "file_path": file_path,
                                         "track_id": status_doc.track_id,  # Preserve existing track_id
                                         "metadata": {
+                                            **{k: v for k, v in existing_metadata.items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
                                         },
@@ -2075,6 +2084,7 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
+                                                **{k: v for k, v in (getattr(status_doc, "metadata", {}) or {}).items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
                                             },
@@ -4100,6 +4110,8 @@ class LightRAG:
         self,
         entity_name: str,
         ontology_id: Optional[str] = None,
+        attribute_name: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Asynchronously enrich a single entity with additional information.
 
@@ -4109,6 +4121,8 @@ class LightRAG:
         Args:
             entity_name: Name of the entity to enrich
             ontology_id: Optional ontology ID to guide enrichment
+            attribute_name: Optional specific attribute to enrich
+            prompt: Optional custom prompt to use for enrichment
 
         Returns:
             Dict containing enrichment result with fields:
@@ -4141,7 +4155,76 @@ class LightRAG:
         # Perform enrichment
         result = await enrichment_service.enrich_entity(
             entity_name=entity_name,
-            ontology_id=ontology_id
+            ontology_id=ontology_id,
+            attribute_name=attribute_name,
+            custom_prompt=prompt
+        )
+
+        # Return as dict for JSON serialization
+        return {
+            "entity_name": result.entity_name,
+            "status": result.status.value,
+            "original_data": result.original_data,
+            "enriched_data": result.enriched_data,
+            "error_message": result.error_message,
+            "processing_time": result.processing_time,
+        }
+
+    async def aenrich_entity_with_vllm(
+        self,
+        entity_name: str,
+        ontology_id: Optional[str] = None,
+        attribute_name: Optional[str] = None,
+        prompt: Optional[str] = None,
+        image_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Asynchronously enrich a single entity using VLLM with vision capabilities.
+
+        This method is similar to aenrich_entity but supports vision models
+        that can process images along with text.
+
+        Args:
+            entity_name: Name of the entity to enrich
+            ontology_id: Optional ontology ID to guide enrichment
+            attribute_name: Optional specific attribute to enrich
+            prompt: Optional custom prompt to use for enrichment
+            image_url: Optional URL of an image related to the entity
+
+        Returns:
+            Dict containing enrichment result with fields:
+                - entity_name: str
+                - status: str ("completed", "failed", "skipped")
+                - original_data: dict
+                - enriched_data: dict
+                - error_message: str or None
+                - processing_time: float
+        """
+        from lightrag.enrichment import EntityEnrichmentService, EnrichmentConfig
+
+        # Get LLM function
+        llm_func = self.llm_model_func
+
+        # Apply priority wrapper
+        from functools import partial
+        llm_func = partial(llm_func, _priority=8)
+
+        # Create enrichment service
+        enrichment_service = EntityEnrichmentService(
+            graph_storage=self.chunk_entity_relation_graph,
+            kv_storage=self.llm_response_cache,
+            llm_model_func=llm_func,
+            config=EnrichmentConfig(
+                language=self.addon_params.get("language", "English")
+            )
+        )
+
+        # Perform enrichment with vision support
+        result = await enrichment_service.enrich_entity(
+            entity_name=entity_name,
+            ontology_id=ontology_id,
+            attribute_name=attribute_name,
+            custom_prompt=prompt,
+            image_url=image_url
         )
 
         # Return as dict for JSON serialization

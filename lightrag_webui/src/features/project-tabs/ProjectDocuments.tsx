@@ -7,9 +7,11 @@ import { useState } from 'react'
 import { DocumentUploader, FileList } from '@/features/documents'
 import { Upload, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useProjectStore } from '@/stores'
 
 export default function ProjectDocuments() {
   const [view, setView] = useState<'upload' | 'list'>('list')
+  const { currentProject } = useProjectStore()
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gradient-to-br from-[hsl(var(--background))] to-[hsl(var(--paper-warm))]">
@@ -60,7 +62,7 @@ export default function ProjectDocuments() {
             </div>
           ) : (
             <div className="p-4">
-              <FileList />
+              <FileList projectId={currentProject?.project_id} />
             </div>
           )}
         </div>

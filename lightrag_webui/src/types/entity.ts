@@ -42,7 +42,7 @@ export interface EnrichmentPrompt {
 
 export interface EnrichmentRequest {
   entity_name: string
-  ontology_id: string
+  ontology_id?: string
   attribute_name?: string
   prompt?: string
   model?: 'llm' | 'vllm'

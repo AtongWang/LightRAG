@@ -3547,6 +3547,7 @@ class PGDocStatusStorage(DocStatusStorage):
     async def get_docs_paginated(
         self,
         status_filter: DocStatus | None = None,
+        project_id: str | None = None,
         page: int = 1,
         page_size: int = 50,
         sort_field: str = "updated_at",
@@ -3556,6 +3557,7 @@ class PGDocStatusStorage(DocStatusStorage):
 
         Args:
             status_filter: Filter by document status, None for all statuses
+            project_id: Filter by project ID (stored in metadata), None for all projects
             page: Page number (1-based)
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')
@@ -3591,12 +3593,20 @@ class PGDocStatusStorage(DocStatusStorage):
         param_count = 1
 
         # Build WHERE clause with parameterized query
+        where_conditions = ["workspace=$1"]
+
         if status_filter is not None:
             param_count += 1
-            where_clause = "WHERE workspace=$1 AND status=$2"
+            where_conditions.append(f"status=${param_count}")
             params["status"] = status_filter.value
-        else:
-            where_clause = "WHERE workspace=$1"
+
+        if project_id is not None:
+            param_count += 1
+            # Filter by project_id in metadata JSON field
+            where_conditions.append(f"metadata->>'project_id' = ${param_count}")
+            params["project_id"] = project_id
+
+        where_clause = "WHERE " + " AND ".join(where_conditions)
 
         # Build ORDER BY clause using validated whitelist values
         order_clause = f"ORDER BY {sort_field} {sort_direction.upper()}"

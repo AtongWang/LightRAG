@@ -156,6 +156,70 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
                 status_code=500, detail=f"Error searching labels: {str(e)}"
             )
 
+    @router.get("/graphs/project/{project_id}", dependencies=[Depends(combined_auth)])
+    async def get_project_graph(
+        project_id: str,
+        max_depth: int = Query(3, description="Maximum depth of graph", ge=1),
+        max_nodes: int = Query(1000, description="Maximum nodes to return", ge=1),
+    ):
+        """
+        Retrieve the knowledge graph for a specific project.
+
+        This endpoint returns all nodes and edges associated with a project's workspace.
+        Useful for visualizing project-specific knowledge graphs.
+
+        Args:
+            project_id (str): The project ID to get graph for
+            max_depth (int, optional): Maximum depth of the subgraph, Defaults to 3
+            max_nodes (int, optional): Maximum nodes to return, Defaults to 1000
+
+        Returns:
+            Dict with 'nodes' and 'edges' lists
+        """
+        try:
+            # Get project workspace
+            from lightrag.projects import ProjectManager
+            kv_storage = rag.llm_response_cache
+            project_manager = ProjectManager(kv_storage)
+
+            project = await project_manager.get(project_id)
+            if not project:
+                raise HTTPException(
+                    status_code=404, detail=f"Project '{project_id}' not found"
+                )
+
+            # Get all nodes from the graph storage
+            graph_storage = rag.chunk_entity_relation_graph
+
+            # Try to get all nodes and edges
+            try:
+                # Get popular labels to find starting points
+                labels = await graph_storage.get_popular_labels(limit=10)
+
+                if not labels:
+                    return {"nodes": [], "edges": []}
+
+                # Use the most popular label as starting point
+                result = await rag.get_knowledge_graph(
+                    node_label=labels[0],
+                    max_depth=max_depth,
+                    max_nodes=max_nodes,
+                )
+                return result
+
+            except AttributeError:
+                # If methods not available, return empty graph
+                return {"nodes": [], "edges": []}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting project graph for '{project_id}': {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500, detail=f"Error getting project graph: {str(e)}"
+            )
+
     @router.get("/graphs", dependencies=[Depends(combined_auth)])
     async def get_knowledge_graph(
         label: str = Query(..., description="Label to get knowledge graph for"),

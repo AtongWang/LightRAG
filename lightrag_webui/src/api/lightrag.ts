@@ -212,6 +212,7 @@ export type TrackStatusResponse = {
 
 export type DocumentsRequest = {
   status_filter?: DocStatus | null
+  project_id?: string | null
   page: number
   page_size: number
   sort_field: 'created_at' | 'updated_at' | 'id' | 'file_path'
@@ -791,10 +792,14 @@ export const insertTexts = async (texts: string[]): Promise<DocActionResponse> =
 
 export const uploadDocument = async (
   file: File,
-  onUploadProgress?: (percentCompleted: number) => void
+  onUploadProgress?: (percentCompleted: number) => void,
+  projectId?: string
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+  if (projectId) {
+    formData.append('project_id', projectId)
+  }
 
   const response = await axiosInstance.post('/documents/upload', formData, {
     headers: {

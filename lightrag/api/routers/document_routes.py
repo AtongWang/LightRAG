@@ -17,6 +17,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     UploadFile,
 )
@@ -581,6 +582,7 @@ class DocumentsRequest(BaseModel):
 
     Attributes:
         status_filter: Filter by document status, None for all statuses
+        project_id: Filter by project ID, None for all projects
         page: Page number (1-based)
         page_size: Number of documents per page (10-200)
         sort_field: Field to sort by ('created_at', 'updated_at', 'id', 'file_path')
@@ -589,6 +591,9 @@ class DocumentsRequest(BaseModel):
 
     status_filter: Optional[DocStatus] = Field(
         default=None, description="Filter by document status, None for all statuses"
+    )
+    project_id: Optional[str] = Field(
+        default=None, description="Filter by project ID, None for all projects"
     )
     page: int = Field(default=1, ge=1, description="Page number (1-based)")
     page_size: int = Field(
@@ -605,6 +610,7 @@ class DocumentsRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "status_filter": "PROCESSED",
+                "project_id": "proj_12345678",
                 "page": 1,
                 "page_size": 50,
                 "sort_field": "updated_at",
@@ -1190,7 +1196,7 @@ def _extract_xlsx(file_bytes: bytes) -> str:
 
 
 async def pipeline_enqueue_file(
-    rag: LightRAG, file_path: Path, track_id: str = None
+    rag: LightRAG, file_path: Path, track_id: str = None, metadata: dict = None
 ) -> tuple[bool, str]:
     """Add a file to the queue for processing
 
@@ -1198,6 +1204,7 @@ async def pipeline_enqueue_file(
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
+        metadata: Optional metadata dict to attach to the document (e.g., project_id)
     Returns:
         tuple: (success: bool, track_id: str)
     """
@@ -1559,7 +1566,7 @@ async def pipeline_enqueue_file(
 
             try:
                 await rag.apipeline_enqueue_documents(
-                    content, file_paths=file_path.name, track_id=track_id
+                    content, file_paths=file_path.name, track_id=track_id, metadata=metadata
                 )
 
                 logger.info(
@@ -1643,17 +1650,18 @@ async def pipeline_enqueue_file(
                 logger.error(f"Error deleting file {file_path}: {str(e)}")
 
 
-async def pipeline_index_file(rag: LightRAG, file_path: Path, track_id: str = None):
+async def pipeline_index_file(rag: LightRAG, file_path: Path, track_id: str = None, metadata: dict = None):
     """Index a file with track_id
 
     Args:
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
+        metadata: Optional metadata dict to attach to the document (e.g., project_id)
     """
     try:
         success, returned_track_id = await pipeline_enqueue_file(
-            rag, file_path, track_id
+            rag, file_path, track_id, metadata
         )
         if success:
             await rag.apipeline_process_enqueue_documents()
@@ -2069,7 +2077,9 @@ def create_document_routes(
         "/upload", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
     )
     async def upload_to_input_dir(
-        background_tasks: BackgroundTasks, file: UploadFile = File(...)
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+        project_id: Optional[str] = Form(None),
     ):
         """
         Upload a file to the input directory and index it.
@@ -2081,6 +2091,7 @@ def create_document_routes(
         Args:
             background_tasks: FastAPI BackgroundTasks for async processing
             file (UploadFile): The file to be uploaded. It must have an allowed extension.
+            project_id (str, optional): Project ID to associate with the document for isolation.
 
         Returns:
             InsertResponse: A response object containing the upload status and a message.
@@ -2126,8 +2137,11 @@ def create_document_routes(
 
             track_id = generate_track_id("upload")
 
+            # Build metadata with project_id if provided
+            metadata = {"project_id": project_id} if project_id else None
+
             # Add to background tasks and get track_id
-            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id)
+            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id, metadata)
 
             return InsertResponse(
                 status="success",
@@ -2997,6 +3011,7 @@ def create_document_routes(
             # Get paginated documents and status counts in parallel
             docs_task = rag.doc_status.get_docs_paginated(
                 status_filter=request.status_filter,
+                project_id=request.project_id,
                 page=request.page,
                 page_size=request.page_size,
                 sort_field=request.sort_field,

@@ -19,7 +19,13 @@ class ProjectManager:
         self.kv = kv_storage
         self._cache: Dict[str, Project] = {}
 
-    async def create(self, name: str, description: str = "") -> Project:
+    async def create(
+        self,
+        name: str,
+        description: str = "",
+        cover_image: Optional[str] = None,
+        tags: Optional[List[str]] = None
+    ) -> Project:
         """创建项目"""
         project_id = f"proj_{uuid.uuid4().hex[:8]}"
         workspace = f"workspace_{project_id}"
@@ -32,7 +38,9 @@ class ProjectManager:
             workspace=workspace,
             created_at=datetime.utcnow().isoformat(),
             updated_at=datetime.utcnow().isoformat(),
-            status='active'
+            status='active',
+            cover_image=cover_image,
+            tags=tags or []
         )
 
         # 存储：key="project_{project_id}"
@@ -65,9 +73,29 @@ class ProjectManager:
 
     async def list_all(self) -> List[Project]:
         """列出所有项目"""
-        # TODO：需要 KV 支持 filter_keys 或 list_keys
-        # 暂时从缓存返回
-        return list(self._cache.values())
+        # 直接访问 KV 存储的内部数据结构扫描所有项目
+        projects = []
+
+        # 使用 filter_keys 的反向逻辑来获取存在的项目键
+        # 首先扫描存储中所有以 "project_" 开头的键
+        if hasattr(self.kv, '_data') and hasattr(self.kv, '_storage_lock'):
+            async with self.kv._storage_lock:
+                all_keys = list(self.kv._data.keys())
+        else:
+            # 回退到缓存
+            return list(self._cache.values())
+
+        # 过滤出项目键
+        project_keys = [k for k in all_keys if k.startswith("project_")]
+
+        # 获取所有项目
+        for key in project_keys:
+            project_id = key.replace("project_", "", 1)
+            project = await self.get(project_id)
+            if project:
+                projects.append(project)
+
+        return projects
 
     async def delete(self, project_id: str):
         """删除项目"""
@@ -101,3 +129,41 @@ class ProjectManager:
         # 更新缓存
         self._cache[project_id] = project
         logger.info(f"更新项目 {project_id} 的 ontology_id: {ontology_id}")
+
+    async def update(self, project_id: str, **kwargs) -> Project:
+        """更新项目信息
+
+        Args:
+            project_id: 项目ID
+            **kwargs: 要更新的字段（name, description等）
+
+        Returns:
+            更新后的项目对象
+        """
+        project = await self.get(project_id)
+        if project is None:
+            raise ValueError(f"项目 {project_id} 不存在")
+
+        # 更新允许的字段
+        if 'name' in kwargs and kwargs['name'] is not None:
+            project.name = kwargs['name']
+        if 'description' in kwargs and kwargs['description'] is not None:
+            project.description = kwargs['description']
+        if 'cover_image' in kwargs:
+            project.cover_image = kwargs['cover_image']
+        if 'tags' in kwargs and kwargs['tags'] is not None:
+            project.tags = kwargs['tags']
+
+        # 更新时间戳
+        project.updated_at = datetime.utcnow().isoformat()
+
+        # 更新存储
+        await self.kv.upsert({
+            f"project_{project_id}": project.to_dict()
+        })
+
+        # 更新缓存
+        self._cache[project_id] = project
+        logger.info(f"更新项目: {project_id}")
+
+        return project

@@ -10,6 +10,7 @@ import type {
   UpdateOntologyDto,
   ValidationResult
 } from '@/types/ontology'
+import * as api from '@/api/meme-lab'
 
 interface OntologyStore {
   // 状态
@@ -44,44 +45,12 @@ export const useOntologyStore = create<OntologyStore>()(
       fetchOntology: async (projectId: string) => {
         set({ loading: true, error: null })
         try {
-          // TODO: 实现API调用
-          // 首先获取项目的ontology_id
-          // const project = await api.get(`/projects/${projectId}`)
-          // const ontologyId = project.data.ontology_id
-
-          // if (!ontologyId) {
-          //   set({ currentOntology: null, loading: false })
-          //   return
-          // }
-
-          // const response = await api.get(`/ontology/${ontologyId}`)
-          // const ontology = response.data
-
-          // 临时mock数据
-          const mockOntology: OntologySpec = {
-            ontology_id: 'onto_001',
-            project_id: projectId,
-            name: '文物本体',
-            description: '中国古代文物知识图谱本体',
-            version: '1.0',
-            language: 'zh',
-            entity_types: ['青铜器', '陶瓷', '玉器', '书画', 'Other'],
-            relation_types: ['制造', '拥有', '收藏', '出土', 'Other'],
-            entity_attributes: {
-              青铜器: {
-                type: 'string',
-                required: false,
-                description: '青铜器类型'
-              }
-            },
-            relation_attributes: {},
-            created_at: '2025-01-01T00:00:00',
-            updated_at: '2025-01-08T00:00:00'
-          }
+          // 直接通过项目ID获取本体
+          const ontology = await api.getProjectOntology(projectId)
 
           set(state => ({
-            ontologies: { ...state.ontologies, [projectId]: mockOntology },
-            currentOntology: mockOntology,
+            ontologies: { ...state.ontologies, [projectId]: ontology },
+            currentOntology: ontology,
             loading: false
           }))
         } catch (error) {
@@ -97,18 +66,9 @@ export const useOntologyStore = create<OntologyStore>()(
       getOntology: async (ontologyId: string) => {
         set({ loading: true, error: null })
         try {
-          // TODO: 实现API调用
-          // const response = await api.get(`/ontology/${ontologyId}`)
-          // const ontology = response.data
-
-          // 临时mock
-          const ontology = get().ontologies['proj_001']
-          if (ontology) {
-            set({ currentOntology: ontology, loading: false })
-            return ontology
-          }
-
-          throw new Error('本体不存在')
+          const ontology = await api.getOntology(ontologyId)
+          set({ currentOntology: ontology, loading: false })
+          return ontology
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : '获取本体失败',
@@ -122,26 +82,7 @@ export const useOntologyStore = create<OntologyStore>()(
       createOntology: async (data: CreateOntologyDto) => {
         set({ loading: true, error: null })
         try {
-          // TODO: 实现API调用
-          // const response = await api.post('/ontology/create', data)
-          // const ontology = response.data
-
-          // 临时mock
-          const ontology: OntologySpec = {
-            ontology_id: `onto_${Date.now()}`,
-            project_id: data.project_id,
-            name: data.name,
-            description: data.description,
-            version: '1.0',
-            language: data.language,
-            entity_types: data.entity_types,
-            relation_types: data.relation_types,
-            entity_attributes: data.entity_attributes,
-            relation_attributes: data.relation_attributes,
-            normalization_rules: data.normalization_rules,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
+          const ontology = await api.createOntology(data)
 
           set(state => ({
             ontologies: {
@@ -166,8 +107,7 @@ export const useOntologyStore = create<OntologyStore>()(
       updateOntology: async (ontologyId: string, data: UpdateOntologyDto) => {
         set({ loading: true, error: null })
         try {
-          // TODO: 实现API调用
-          // await api.put(`/ontology/${ontologyId}`, data)
+          await api.updateOntology(ontologyId, data)
 
           set(state => {
             const updated = {
@@ -198,8 +138,7 @@ export const useOntologyStore = create<OntologyStore>()(
       deleteOntology: async (ontologyId: string) => {
         set({ loading: true, error: null })
         try {
-          // TODO: 实现API调用
-          // await api.delete(`/ontology/${ontologyId}`)
+          await api.deleteOntology(ontologyId)
 
           set(state => {
             const projectId = Object.keys(state.ontologies).find(
@@ -235,21 +174,20 @@ export const useOntologyStore = create<OntologyStore>()(
       validateOntology: async (ontologyId: string) => {
         set({ validationError: null })
         try {
-          // TODO: 实现API调用
-          // const response = await api.get(`/ontology/${ontologyId}/validate`)
-          // return response.data
+          const result = await api.validateOntology(ontologyId)
 
-          // 临时mock - 总是返回有效
-          return {
-            is_valid: true,
-            warnings: []
+          if (!result.is_valid) {
+            set({ validationError: result.error_message || '验证失败' })
           }
+
+          return result
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : '验证失败'
           set({ validationError: errorMsg })
           return {
             is_valid: false,
-            error_message: errorMsg
+            error_message: errorMsg,
+            warnings: []
           }
         }
       },

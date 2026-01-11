@@ -907,6 +907,7 @@ class RedisDocStatusStorage(DocStatusStorage):
     async def get_docs_paginated(
         self,
         status_filter: DocStatus | None = None,
+        project_id: str | None = None,
         page: int = 1,
         page_size: int = 50,
         sort_field: str = "updated_at",
@@ -916,6 +917,7 @@ class RedisDocStatusStorage(DocStatusStorage):
 
         Args:
             status_filter: Filter by document status, None for all statuses
+            project_id: Filter by project ID (stored in metadata), None for all projects
             page: Page number (1-based)
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')
@@ -970,6 +972,13 @@ class RedisDocStatusStorage(DocStatusStorage):
                                         != status_filter.value
                                     ):
                                         continue
+
+                                    # Apply project_id filter (stored in metadata)
+                                    if project_id is not None:
+                                        doc_metadata = doc_data.get("metadata", {})
+                                        doc_project_id = doc_metadata.get("project_id") if doc_metadata else None
+                                        if doc_project_id != project_id:
+                                            continue
 
                                     # Extract document ID from key
                                     doc_id = key.split(":", 1)[1]

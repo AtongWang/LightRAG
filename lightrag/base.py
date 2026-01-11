@@ -783,6 +783,7 @@ class DocStatusStorage(BaseKVStorage, ABC):
     async def get_docs_paginated(
         self,
         status_filter: DocStatus | None = None,
+        project_id: str | None = None,
         page: int = 1,
         page_size: int = 50,
         sort_field: str = "updated_at",
@@ -792,6 +793,7 @@ class DocStatusStorage(BaseKVStorage, ABC):
 
         Args:
             status_filter: Filter by document status, None for all statuses
+            project_id: Filter by project ID (stored in metadata), None for all projects
             page: Page number (1-based)
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')

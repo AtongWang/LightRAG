@@ -3,11 +3,13 @@
  * 显示项目中所有已上传的文档
  */
 
-import { useEffect, useState } from 'react'
-import { FileText, Search, Trash2, Download, Eye } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { FileText, Search, Trash2, Download, Eye, RefreshCw } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
+import { getDocumentsPaginated, deleteDocuments, type DocStatusResponse } from '@/api/lightrag'
+import { toast } from 'sonner'
 
 interface DocumentFile {
   id: string
@@ -21,65 +23,83 @@ interface DocumentFile {
   error_message?: string
 }
 
-export function FileList() {
+interface FileListProps {
+  projectId?: string
+}
+
+export function FileList({ projectId }: FileListProps) {
   const [files, setFiles] = useState<DocumentFile[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    fetchFiles()
-  }, [])
-
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     setLoading(true)
     try {
-      // Mock数据
-      setFiles([
-        {
-          id: '1',
-          filename: '红楼梦.txt',
-          file_type: 'text/plain',
-          file_size: 2048576,
-          upload_time: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-          status: 'completed',
-          entity_count: 1250,
-          relation_count: 890
-        },
-        {
-          id: '2',
-          filename: '三国演义.pdf',
-          file_type: 'application/pdf',
-          file_size: 5242880,
-          upload_time: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-          status: 'completed',
-          entity_count: 980,
-          relation_count: 720
-        },
-        {
-          id: '3',
-          filename: '西游记.docx',
-          file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          file_size: 3145728,
-          upload_time: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(),
-          status: 'parsing'
-        },
-        {
-          id: '4',
-          filename: '水浒传.epub',
-          file_type: 'application/epub+zip',
-          file_size: 1572864,
-          upload_time: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
-          status: 'failed',
-          error_message: '不支持的文件格式'
+      // 使用真实的API获取文档列表，按项目ID过滤
+      const response = await getDocumentsPaginated({
+        page: 1,
+        page_size: 100,
+        sort_field: 'created_at',
+        sort_direction: 'desc',
+        project_id: projectId || null
+      })
+
+      // 转换API响应格式为组件所需格式
+      const convertedFiles: DocumentFile[] = response.documents.map((doc: DocStatusResponse) => {
+        // 从file_path提取文件名
+        const filename = doc.file_path?.split('/').pop() || doc.id
+        
+        // 映射状态
+        const statusMap: Record<string, DocumentFile['status']> = {
+          'pending': 'pending',
+          'processing': 'parsing',
+          'preprocessed': 'parsing',
+          'processed': 'completed',
+          'failed': 'failed'
         }
-      ])
+
+        return {
+          id: doc.id,
+          filename: filename,
+          file_type: getFileType(filename),
+          file_size: doc.content_length || 0,
+          upload_time: doc.created_at,
+          status: statusMap[doc.status] || 'pending',
+          entity_count: doc.chunks_count,
+          error_message: doc.error_msg
+        }
+      })
+
+      setFiles(convertedFiles)
     } catch (error) {
       console.error('Failed to fetch files:', error)
+      toast.error('获取文档列表失败')
     } finally {
       setLoading(false)
     }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchFiles()
+  }, [fetchFiles, projectId])
+
+  // 根据文件名获取文件类型
+  const getFileType = (filename: string): string => {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    const typeMap: Record<string, string> = {
+      'txt': 'text/plain',
+      'md': 'text/markdown',
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif'
+    }
+    return typeMap[ext || ''] || 'application/octet-stream'
   }
 
   const filteredFiles = files.filter(file => {
@@ -89,7 +109,14 @@ export function FileList() {
   })
 
   const handleDelete = async (fileId: string) => {
-    setFiles(prev => prev.filter(f => f.id !== fileId))
+    try {
+      await deleteDocuments([fileId])
+      setFiles(prev => prev.filter(f => f.id !== fileId))
+      toast.success('文件删除成功')
+    } catch (error) {
+      toast.error('文件删除失败')
+      console.error('Failed to delete file:', error)
+    }
   }
 
   const handleSelectAll = () => {
@@ -169,6 +196,13 @@ export function FileList() {
           <option value="pending">等待中</option>
           <option value="failed">失败</option>
         </select>
+        <button
+          onClick={() => fetchFiles()}
+          className="p-2.5 bg-white dark:bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg hover:bg-muted transition"
+          title="刷新列表"
+        >
+          <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+        </button>
       </div>
 
       {/* 批量操作 */}
@@ -176,7 +210,19 @@ export function FileList() {
         <div className="flex items-center justify-between p-3 bg-[hsl(var(--vermillion)/0.1)] rounded-lg border border-[hsl(var(--vermillion)/0.2)]">
           <span className="text-sm font-medium text-[hsl(var(--vermillion))]">已选择 {selectedFiles.size} 个文件</span>
           <div className="flex gap-2">
-            <button className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition">
+            <button 
+              onClick={async () => {
+                try {
+                  await deleteDocuments(Array.from(selectedFiles))
+                  setFiles(prev => prev.filter(f => !selectedFiles.has(f.id)))
+                  setSelectedFiles(new Set())
+                  toast.success('批量删除成功')
+                } catch (error) {
+                  toast.error('批量删除失败')
+                }
+              }}
+              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+            >
               批量删除
             </button>
             <button
