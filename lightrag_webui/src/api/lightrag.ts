@@ -1024,3 +1024,58 @@ export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> =
   const response = await axiosInstance.get('/documents/status_counts')
   return response.data
 }
+
+/**
+ * Download a document by its ID
+ * @param docId The document ID to download
+ * @returns Promise that resolves when download is complete
+ */
+export const downloadDocument = async (docId: string): Promise<void> => {
+  const response = await axiosInstance.get(`/documents/download/${docId}`, {
+    responseType: 'blob'
+  })
+
+  // Create download link and trigger download
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+
+  // Try to get filename from Content-Disposition header
+  const contentDisposition = response.headers['content-disposition']
+  let filename = `document-${docId}`
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1].replace(/['"]/g, '')
+    }
+  }
+
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * View document content preview
+ * @param docId The document ID to view
+ * @param maxPreviewLength Maximum characters to return for preview (default: 10000)
+ * @returns Promise with document preview data
+ */
+export const viewDocument = async (docId: string, maxPreviewLength: number = 10000): Promise<{
+  doc_id: string
+  filename: string
+  file_type: string
+  content_length: number
+  content: string
+  content_type: 'text' | 'pdf' | 'image' | 'document' | 'binary'
+  is_full_content: boolean
+  created_at: string
+  status: string
+}> => {
+  const response = await axiosInstance.get(`/documents/view/${docId}`, {
+    params: { max_preview_length: maxPreviewLength }
+  })
+  return response.data
+}

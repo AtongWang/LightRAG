@@ -276,19 +276,39 @@ class JsonDocStatusStorage(DocStatusStorage):
                 if project_id is not None:
                     doc_metadata = doc_data.get("metadata", {})
                     doc_project_id = doc_metadata.get("project_id") if doc_metadata else None
+                    # Debug logging
                     if doc_project_id != project_id:
+                        logger.debug(
+                            f"[{self.workspace}] Document {doc_id} filtered out: doc_project_id={doc_project_id}, requested_project_id={project_id}"
+                        )
                         continue
 
                 try:
-                    # Prepare document data
+                    # Prepare document data - ensure all required fields exist
                     data = doc_data.copy()
                     data.pop("content", None)
-                    if "file_path" not in data:
-                        data["file_path"] = "no-file-path"
+
+                    # Ensure required fields have default values
+                    if "file_path" not in data or not data["file_path"]:
+                        data["file_path"] = data.get("file_path", "no-file-path")
                     if "metadata" not in data:
                         data["metadata"] = {}
                     if "error_msg" not in data:
                         data["error_msg"] = None
+                    if "content_summary" not in data:
+                        data["content_summary"] = ""
+                    if "content_length" not in data:
+                        data["content_length"] = 0
+                    if "created_at" not in data:
+                        data["created_at"] = ""
+                    if "updated_at" not in data:
+                        data["updated_at"] = ""
+                    if "status" not in data:
+                        data["status"] = DocStatus.PENDING
+                    if "track_id" not in data:
+                        data["track_id"] = None
+                    if "chunks_count" not in data:
+                        data["chunks_count"] = None
 
                     doc_status = DocProcessingStatus(**data)
 
@@ -304,10 +324,11 @@ class JsonDocStatusStorage(DocStatusStorage):
 
                     all_docs.append((doc_id, doc_status))
 
-                except KeyError as e:
+                except Exception as e:
                     logger.error(
-                        f"[{self.workspace}] Error processing document {doc_id}: {e}"
+                        f"[{self.workspace}] Error processing document {doc_id}: {e}, data={doc_data}"
                     )
+                    logger.error(traceback.format_exc())
                     continue
 
         # Sort documents

@@ -19,6 +19,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
 )
 from pydantic import BaseModel, Field, field_validator
@@ -2139,6 +2140,7 @@ def create_document_routes(
 
             # Build metadata with project_id if provided
             metadata = {"project_id": project_id} if project_id else None
+            logger.info(f"Uploading file '{safe_filename}' with project_id={project_id}, metadata={metadata}")
 
             # Add to background tasks and get track_id
             background_tasks.add_task(pipeline_index_file, rag, file_path, track_id, metadata)
@@ -3201,6 +3203,437 @@ def create_document_routes(
 
         except Exception as e:
             logger.error(f"Error requesting pipeline cancellation: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/download/{doc_id}",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def download_document(doc_id: str):
+        """
+        Download a document by its ID.
+
+        This endpoint retrieves and returns the original file for a document.
+        The file is returned as a downloadable attachment.
+
+        Args:
+            doc_id (str): The document ID to download
+
+        Returns:
+            FileResponse: The document file as a downloadable attachment
+
+        Raises:
+            HTTPException:
+              - 404: If document is not found
+              - 500: If an unexpected error occurs
+        """
+        try:
+            # Get document status from storage
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if not doc_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document with ID '{doc_id}' not found"
+                )
+
+            # Get file path from document data
+            file_path = doc_data.get("file_path", "")
+            if not file_path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document '{doc_id}' has no associated file path"
+                )
+
+            # Try multiple possible file locations:
+            # 1. Original input directory
+            # 2. __enqueued__ subdirectory (where files are moved after processing)
+            full_path = doc_manager.input_dir / file_path
+            if not full_path.exists():
+                # Try __enqueued__ directory
+                enqueued_path = doc_manager.input_dir / "__enqueued__" / file_path
+                if enqueued_path.exists():
+                    full_path = enqueued_path
+                else:
+                    # Try to find the file by name in __enqueued__ directory
+                    # in case the filename was made unique
+                    import glob
+                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
+                    matches = glob.glob(pattern)
+                    if matches:
+                        full_path = Path(matches[0])
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"File not found: {file_path}"
+                        )
+
+            # Verify the path is within the input directory or its subdirectories (security check)
+            try:
+                resolved_path = full_path.resolve()
+                resolved_input = doc_manager.input_dir.resolve()
+                resolved_path.relative_to(resolved_input)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access to file is not allowed"
+                )
+
+            # Determine media type based on file extension
+            media_type_map = {
+                '.pdf': 'application/pdf',
+                '.txt': 'text/plain',
+                '.md': 'text/markdown',
+                '.html': 'text/html',
+                '.json': 'application/json',
+                '.xml': 'application/xml',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
+                '.doc': 'application/msword',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            }
+            media_type = media_type_map.get(full_path.suffix.lower(), 'application/octet-stream')
+
+            # Return file as downloadable attachment
+            from fastapi.responses import FileResponse
+            response = FileResponse(
+                path=str(full_path),
+                filename=full_path.name,
+                media_type=media_type
+            )
+
+            # Set proper Content-Disposition header with UTF-8 encoding for Chinese filenames
+            import urllib.parse
+            filename_utf8 = full_path.name.encode('utf-8').decode('utf-8')
+            filename_encoded = urllib.parse.quote(filename_utf8)
+            response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename_encoded}"
+
+            return response
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error downloading document {doc_id}: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/view/{doc_id}",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def view_document(doc_id: str, max_preview_length: int = 10000):
+        """
+        View document content preview.
+
+        This endpoint returns a text preview of the document content.
+        For text-based files, it returns the raw text content.
+        For binary files (PDF, images), it returns a message indicating
+        the file type cannot be previewed.
+
+        Args:
+            doc_id (str): The document ID to view
+            max_preview_length (int): Maximum characters to return for preview (default: 10000)
+
+        Returns:
+            dict: Dictionary containing content preview and metadata
+
+        Raises:
+            HTTPException:
+              - 404: If document is not found
+              - 500: If an unexpected error occurs
+        """
+        try:
+            # Get document status from storage
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if not doc_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document with ID '{doc_id}' not found"
+                )
+
+            # Get file path from document data
+            file_path = doc_data.get("file_path", "")
+            if not file_path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document '{doc_id}' has no associated file path"
+                )
+
+            # Try multiple possible file locations:
+            # 1. Original input directory
+            # 2. __enqueued__ subdirectory (where files are moved after processing)
+            full_path = doc_manager.input_dir / file_path
+            if not full_path.exists():
+                # Try __enqueued__ directory
+                enqueued_path = doc_manager.input_dir / "__enqueued__" / file_path
+                if enqueued_path.exists():
+                    full_path = enqueued_path
+                else:
+                    # Try to find the file by name in __enqueued__ directory
+                    # in case the filename was made unique
+                    import glob
+                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
+                    matches = glob.glob(pattern)
+                    if matches:
+                        full_path = Path(matches[0])
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"File not found: {file_path}"
+                        )
+
+            # Verify the path is within the input directory or its subdirectories (security check)
+            try:
+                resolved_path = full_path.resolve()
+                resolved_input = doc_manager.input_dir.resolve()
+                resolved_path.relative_to(resolved_input)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access to file is not allowed"
+                )
+
+            # Determine file type and read content
+            file_ext = full_path.suffix.lower()
+            text_extensions = {'.txt', '.md', '.csv', '.json', '.xml'}
+            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+
+            if file_ext in text_extensions:
+                # Read text file content
+                async with aiofiles.open(full_path, mode='r', encoding='utf-8') as f:
+                    content = await f.read()
+                    # Truncate if too long
+                    content_preview = content
+                    if len(content) > max_preview_length:
+                        content_preview = content[:max_preview_length] + "\n\n... (content truncated)"
+                    return {
+                        "doc_id": doc_id,
+                        "filename": full_path.name,
+                        "file_type": file_ext,
+                        "content_length": len(content),
+                        "content": content_preview,
+                        "is_full_content": len(content) <= max_preview_length,
+                        "content_type": "text",
+                        "created_at": format_datetime(doc_data.get("created_at")),
+                        "status": doc_data.get("status"),
+                    }
+            elif file_ext == '.pdf':
+                # For PDF, read file and encode to base64 for preview
+                async with aiofiles.open(full_path, mode='rb') as f:
+                    pdf_bytes = await f.read()
+                    import base64
+                    content = base64.b64encode(pdf_bytes).decode('utf-8')
+                    return {
+                        "doc_id": doc_id,
+                        "filename": full_path.name,
+                        "file_type": file_ext,
+                        "content_length": len(pdf_bytes),
+                        "content": content,
+                        "content_type": "pdf",
+                        "is_full_content": True,
+                        "created_at": format_datetime(doc_data.get("created_at")),
+                        "status": doc_data.get("status"),
+                    }
+            elif file_ext in image_extensions:
+                # For images, read file and encode to base64 for preview
+                async with aiofiles.open(full_path, mode='rb') as f:
+                    image_bytes = await f.read()
+                    import base64
+                    content = base64.b64encode(image_bytes).decode('utf-8')
+                    return {
+                        "doc_id": doc_id,
+                        "filename": full_path.name,
+                        "file_type": file_ext,
+                        "content_length": len(image_bytes),
+                        "content": content,
+                        "content_type": "image",
+                        "is_full_content": True,
+                        "created_at": format_datetime(doc_data.get("created_at")),
+                        "status": doc_data.get("status"),
+                    }
+            elif file_ext in {'.doc', '.docx'}:
+                return {
+                    "doc_id": doc_id,
+                    "filename": full_path.name,
+                    "file_type": file_ext,
+                    "content_length": 0,
+                    "content": "Word文档格式，请下载后使用Microsoft Word或兼容软件查看",
+                    "content_type": "document",
+                    "is_full_content": False,
+                    "created_at": format_datetime(doc_data.get("created_at")),
+                    "status": doc_data.get("status"),
+                }
+            else:
+                return {
+                    "doc_id": doc_id,
+                    "filename": full_path.name,
+                    "file_type": file_ext,
+                    "content_length": 0,
+                    "content": f"不支持在线预览此文件格式 ({file_ext})，请下载查看",
+                    "content_type": "binary",
+                    "is_full_content": False,
+                    "created_at": format_datetime(doc_data.get("created_at")),
+                    "status": doc_data.get("status"),
+                }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error viewing document {doc_id}: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/preview/{doc_id}",
+    )
+    async def preview_document(
+        doc_id: str,
+        request: Request,
+        token: Optional[str] = None
+    ):
+        """
+        Get a document preview URL for embedding in browser.
+
+        This endpoint returns the actual file content with proper media type
+        for direct browser preview (PDF, images, etc).
+
+        Authentication can be provided via:
+        - Authorization header (Bearer token)
+        - token query parameter (for object/embed tags)
+
+        Args:
+            doc_id (str): The document ID to preview
+            token (str): Optional token parameter for authentication
+
+        Returns:
+            FileResponse: The file with proper media type for browser preview
+
+        Raises:
+            HTTPException:
+              - 401: If authentication is required but not provided
+              - 404: If document is not found
+              - 500: If an unexpected error occurs
+        """
+        # Manual authentication check for preview endpoint
+        # to support both Authorization header and token query parameter
+        try:
+            from lightrag.api.utils_api import auth_handler
+
+            # Get token from query parameter or Authorization header
+            auth_token = token
+            if not auth_token:
+                auth_header = request.headers.get("Authorization")
+                if auth_header and auth_header.startswith("Bearer "):
+                    auth_token = auth_header[7:]
+
+            # Validate token if authentication is configured
+            if auth_handler.is_configured and auth_token:
+                token_info = auth_handler.validate_token(auth_token)
+                # Token is valid, continue
+            elif auth_handler.is_configured and not auth_token:
+                # Check if path is in whitelist
+                from lightrag.api.utils_api import whitelist_patterns
+                path = request.url.path
+                is_whitelisted = False
+                for pattern, is_prefix in whitelist_patterns:
+                    if (is_prefix and path.startswith(pattern)) or (
+                        not is_prefix and path == pattern
+                    ):
+                        is_whitelisted = True
+                        break
+
+                if not is_whitelisted:
+                    raise HTTPException(status_code=401, detail="Authentication required")
+        except HTTPException:
+            raise
+        except Exception as e:
+            # If authentication fails for any other reason, still allow if api_key is set
+            api_key = getattr(global_args, "api_key", None)
+            if not api_key:
+                logger.error(f"Authentication error: {str(e)}")
+                raise HTTPException(status_code=401, detail="Authentication required")
+
+        try:
+            # Get document status from storage
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if not doc_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document with ID '{doc_id}' not found"
+                )
+
+            # Get file path from document data
+            file_path = doc_data.get("file_path", "")
+            if not file_path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document '{doc_id}' has no associated file path"
+                )
+
+            # Try multiple possible file locations
+            full_path = doc_manager.input_dir / file_path
+            if not full_path.exists():
+                enqueued_path = doc_manager.input_dir / "__enqueued__" / file_path
+                if enqueued_path.exists():
+                    full_path = enqueued_path
+                else:
+                    import glob
+                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
+                    matches = glob.glob(pattern)
+                    if matches:
+                        full_path = Path(matches[0])
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"File not found: {file_path}"
+                        )
+
+            # Verify the path is within the input directory or its subdirectories
+            try:
+                resolved_path = full_path.resolve()
+                resolved_input = doc_manager.input_dir.resolve()
+                resolved_path.relative_to(resolved_input)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access to file is not allowed"
+                )
+
+            # Determine media type based on file extension
+            media_type_map = {
+                '.pdf': 'application/pdf',
+                '.txt': 'text/plain',
+                '.md': 'text/markdown',
+                '.html': 'text/html',
+                '.json': 'application/json',
+                '.xml': 'application/xml',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
+            }
+            media_type = media_type_map.get(full_path.suffix.lower(), 'application/octet-stream')
+
+            # Return file for inline preview (not attachment)
+            from fastapi.responses import FileResponse
+            response = FileResponse(
+                path=str(full_path),
+                media_type=media_type
+            )
+
+            # Set Content-Disposition to inline for preview
+            response.headers["Content-Disposition"] = f"inline; filename=\"{full_path.name}\""
+
+            return response
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error previewing document {doc_id}: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 

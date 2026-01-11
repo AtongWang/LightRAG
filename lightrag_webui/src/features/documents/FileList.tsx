@@ -4,11 +4,11 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { FileText, Search, Trash2, Download, Eye, RefreshCw } from 'lucide-react'
+import { FileText, Search, Trash2, Download, Eye, RefreshCw, UploadCloud, X, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
-import { getDocumentsPaginated, deleteDocuments, type DocStatusResponse } from '@/api/lightrag'
+import { getDocumentsPaginated, deleteDocuments, downloadDocument, viewDocument, reprocessFailedDocuments, type DocStatusResponse } from '@/api/lightrag'
 import { toast } from 'sonner'
 
 interface DocumentFile {
@@ -25,14 +25,43 @@ interface DocumentFile {
 
 interface FileListProps {
   projectId?: string
+  refreshTrigger?: number
 }
 
-export function FileList({ projectId }: FileListProps) {
+interface DocumentViewData {
+  doc_id: string
+  filename: string
+  file_type: string
+  content_length: number
+  content: string
+  content_type: 'text' | 'pdf' | 'image' | 'document' | 'binary'
+  is_full_content: boolean
+  created_at: string
+  status: string
+}
+
+export function FileList({ projectId, refreshTrigger }: FileListProps) {
   const [files, setFiles] = useState<DocumentFile[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [viewingDocument, setViewingDocument] = useState<DocumentViewData | null>(null)
+  const [loadingView, setLoadingView] = useState(false)
+  const [reprocessingDocs, setReprocessingDocs] = useState<Set<string>>(new Set())
+  const [previewError, setPreviewError] = useState(false)
+
+  // Get the preview URL for documents
+  const getPreviewUrl = (docId: string) => {
+    const apiKey = localStorage.getItem('LIGHTRAG-API-TOKEN')
+    const baseUrl = import.meta.env.VITE_BACKEND_URL || ''
+    const url = `${baseUrl}/documents/preview/${docId}`
+    // Add token as query parameter for object/embed tags (they don't send Authorization header)
+    if (apiKey) {
+      return `${url}?token=${encodeURIComponent(apiKey)}`
+    }
+    return url
+  }
 
   const fetchFiles = useCallback(async () => {
     setLoading(true)
@@ -83,7 +112,7 @@ export function FileList({ projectId }: FileListProps) {
 
   useEffect(() => {
     fetchFiles()
-  }, [fetchFiles, projectId])
+  }, [fetchFiles, projectId, refreshTrigger])
 
   // 根据文件名获取文件类型
   const getFileType = (filename: string): string => {
@@ -116,6 +145,63 @@ export function FileList({ projectId }: FileListProps) {
     } catch (error) {
       toast.error('文件删除失败')
       console.error('Failed to delete file:', error)
+    }
+  }
+
+  const handleView = async (fileId: string) => {
+    setLoadingView(true)
+    setPreviewError(false)
+    try {
+      const docData = await viewDocument(fileId)
+      setViewingDocument(docData)
+    } catch (error) {
+      toast.error('无法查看文档内容')
+      console.error('Failed to view document:', error)
+      setPreviewError(true)
+    } finally {
+      setLoadingView(false)
+    }
+  }
+
+  const handleDownload = async (fileId: string) => {
+    try {
+      await downloadDocument(fileId)
+      toast.success('文件下载已开始')
+    } catch (error) {
+      toast.error('文件下载失败')
+      console.error('Failed to download file:', error)
+    }
+  }
+
+  const handleReprocessFailed = async () => {
+    try {
+      const response = await reprocessFailedDocuments()
+      toast.success(response.message)
+      // 刷新列表以更新状态
+      setTimeout(() => fetchFiles(), 2000)
+    } catch (error) {
+      toast.error('重新处理失败')
+      console.error('Failed to reprocess documents:', error)
+    }
+  }
+
+  const handleBatchReprocess = async (docIds: string[]) => {
+    // Filter only failed documents
+    const failedDocs = files.filter(f => f.status === 'failed' && docIds.includes(f.id))
+    if (failedDocs.length === 0) {
+      toast.info('所选文档中没有失败的文档')
+      return
+    }
+
+    try {
+      const response = await reprocessFailedDocuments()
+      toast.success(`开始重新处理 ${failedDocs.length} 个失败的文档`)
+      setSelectedFiles(new Set())
+      // 刷新列表以更新状态
+      setTimeout(() => fetchFiles(), 2000)
+    } catch (error) {
+      toast.error('批量重新处理失败')
+      console.error('Failed to batch reprocess:', error)
     }
   }
 
@@ -210,7 +296,19 @@ export function FileList({ projectId }: FileListProps) {
         <div className="flex items-center justify-between p-3 bg-[hsl(var(--vermillion)/0.1)] rounded-lg border border-[hsl(var(--vermillion)/0.2)]">
           <span className="text-sm font-medium text-[hsl(var(--vermillion))]">已选择 {selectedFiles.size} 个文件</span>
           <div className="flex gap-2">
-            <button 
+            {/* 检查是否有失败的文件被选中 */}
+            {Array.from(selectedFiles).some(id => files.find(f => f.id === id)?.status === 'failed') && (
+              <button
+                onClick={async () => {
+                  await handleBatchReprocess(Array.from(selectedFiles))
+                }}
+                className="px-3 py-1.5 bg-[hsl(var(--jade))] text-white rounded-lg text-sm hover:bg-[hsl(var(--jade)/0.8)] transition flex items-center gap-1"
+              >
+                <UploadCloud className="w-4 h-4" />
+                重新处理
+              </button>
+            )}
+            <button
               onClick={async () => {
                 try {
                   await deleteDocuments(Array.from(selectedFiles))
@@ -232,6 +330,24 @@ export function FileList({ projectId }: FileListProps) {
               取消选择
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 失败文档提示 */}
+      {files.some(f => f.status === 'failed') && (
+        <div className="flex items-center justify-between p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-900/30">
+          <div className="flex items-center gap-2">
+            <UploadCloud className="w-5 h-5 text-orange-600" />
+            <span className="text-sm font-medium text-orange-700 dark:text-orange-300">
+              有 {files.filter(f => f.status === 'failed').length} 个文档处理失败
+            </span>
+          </div>
+          <button
+            onClick={handleReprocessFailed}
+            className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 transition"
+          >
+            重新处理所有失败文档
+          </button>
         </div>
       )}
 
@@ -308,17 +424,33 @@ export function FileList({ projectId }: FileListProps) {
                 <div className="col-span-1">
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
                     <button
-                      className="p-1.5 hover:bg-muted rounded-md"
+                      onClick={() => handleView(file.id)}
+                      disabled={loadingView}
+                      className="p-1.5 hover:bg-muted rounded-md disabled:opacity-50"
                       title="查看"
                     >
-                      <Eye className="w-4 h-4 text-muted-foreground" />
+                      {loadingView && viewingDocument?.doc_id === file.id ? (
+                        <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+                      ) : (
+                        <Eye className="w-4 h-4 text-muted-foreground" />
+                      )}
                     </button>
                     <button
+                      onClick={() => handleDownload(file.id)}
                       className="p-1.5 hover:bg-muted rounded-md"
                       title="下载"
                     >
                       <Download className="w-4 h-4 text-muted-foreground" />
                     </button>
+                    {file.status === 'failed' && (
+                      <button
+                        onClick={handleReprocessFailed}
+                        className="p-1.5 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-md"
+                        title="重新处理"
+                      >
+                        <UploadCloud className="w-4 h-4 text-orange-600" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDelete(file.id)}
                       className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md"
@@ -333,6 +465,154 @@ export function FileList({ projectId }: FileListProps) {
           </div>
         )}
       </div>
+
+      {/* 查看文档模态框 */}
+      {viewingDocument && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setViewingDocument(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 标题栏 */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3">
+                <FileText className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <h3 className="font-semibold text-lg">{viewingDocument.filename}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {viewingDocument.file_type} · {viewingDocument.content_type === 'text' ? `${viewingDocument.content_length} 字符` : `${(viewingDocument.content_length / 1024).toFixed(2)} KB`}
+                    {!viewingDocument.is_full_content && ' · 内容已截断'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingDocument(null)}
+                className="p-2 hover:bg-muted rounded-md transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 内容区域 - 根据类型显示不同内容 */}
+            <div className="flex-1 overflow-hidden p-4 bg-gray-50 dark:bg-gray-900">
+              {viewingDocument.content_type === 'text' && (
+                <div className="h-full overflow-auto">
+                  <pre className="whitespace-pre-wrap break-words text-sm font-mono bg-white dark:bg-gray-800 p-4 rounded-lg">
+                    {viewingDocument.content}
+                  </pre>
+                </div>
+              )}
+
+              {viewingDocument.content_type === 'pdf' && (
+                <div className="w-full h-full">
+                  {previewError ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center">
+                        <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                        <p className="text-muted-foreground mb-4">无法加载PDF预览</p>
+                        <button
+                          onClick={() => handleDownload(viewingDocument.doc_id)}
+                          className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
+                        >
+                          下载PDF文件
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <object
+                      data={getPreviewUrl(viewingDocument.doc_id)}
+                      type="application/pdf"
+                      className="w-full h-full rounded-lg"
+                      onError={() => setPreviewError(true)}
+                    >
+                      <div className="flex items-center justify-center h-full">
+                        <div className="text-center">
+                          <p className="text-muted-foreground mb-2">您的浏览器不支持PDF预览</p>
+                          <button
+                            onClick={() => handleDownload(viewingDocument.doc_id)}
+                            className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
+                          >
+                            下载PDF文件
+                          </button>
+                        </div>
+                      </div>
+                    </object>
+                  )}
+                </div>
+              )}
+
+              {viewingDocument.content_type === 'image' && (
+                <div className="w-full h-full flex items-center justify-center">
+                  <img
+                    src={getPreviewUrl(viewingDocument.doc_id)}
+                    alt={viewingDocument.filename}
+                    className="max-w-full max-h-full object-contain rounded-lg"
+                    onError={() => setPreviewError(true)}
+                  />
+                </div>
+              )}
+
+              {viewingDocument.content_type === 'document' && (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground mb-4">{viewingDocument.content}</p>
+                    <button
+                      onClick={() => handleDownload(viewingDocument.doc_id)}
+                      className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
+                    >
+                      下载文件
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {viewingDocument.content_type === 'binary' && (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground mb-4">{viewingDocument.content}</p>
+                    <button
+                      onClick={() => handleDownload(viewingDocument.doc_id)}
+                      className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
+                    >
+                      下载文件
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 底部操作栏 */}
+            <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <span className="text-sm text-muted-foreground">
+                上传时间: {formatDistanceToNow(new Date(viewingDocument.created_at), {
+                  addSuffix: true,
+                  locale: zhCN
+                })}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleDownload(viewingDocument.doc_id)}
+                  className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  下载
+                </button>
+                <button
+                  onClick={() => setViewingDocument(null)}
+                  className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-muted transition"
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

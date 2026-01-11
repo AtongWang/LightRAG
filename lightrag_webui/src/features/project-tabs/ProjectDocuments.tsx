@@ -11,7 +11,15 @@ import { useProjectStore } from '@/stores'
 
 export default function ProjectDocuments() {
   const [view, setView] = useState<'upload' | 'list'>('list')
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
   const { currentProject } = useProjectStore()
+
+  const handleUploadSuccess = () => {
+    // 增加刷新触发器，通知 FileList 刷新
+    setRefreshTrigger(prev => prev + 1)
+    // 自动切换到列表视图
+    setView('list')
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gradient-to-br from-[hsl(var(--background))] to-[hsl(var(--paper-warm))]">
@@ -58,11 +66,14 @@ export default function ProjectDocuments() {
         <div className="bg-white dark:bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] shadow-sm min-h-full">
           {view === 'upload' ? (
             <div className="p-6">
-              <DocumentUploader />
+              <DocumentUploader onUploadSuccess={handleUploadSuccess} />
             </div>
           ) : (
             <div className="p-4">
-              <FileList projectId={currentProject?.project_id} />
+              <FileList
+                projectId={currentProject?.project_id}
+                refreshTrigger={refreshTrigger}
+              />
             </div>
           )}
         </div>

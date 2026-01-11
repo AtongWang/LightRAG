@@ -18,7 +18,11 @@ interface UploadFile {
   error?: string
 }
 
-export function DocumentUploader() {
+interface DocumentUploaderProps {
+  onUploadSuccess?: () => void
+}
+
+export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
   const { currentProject } = useProjectStore()
   const [files, setFiles] = useState<UploadFile[]>([])
 
@@ -29,6 +33,7 @@ export function DocumentUploader() {
 
     try {
       // 使用真实的API上传文件，传递当前项目ID
+      console.log('Uploading file with project_id:', currentProject?.project_id)
       await uploadDocument(
         uploadItem.file,
         (progress) => {

@@ -33,6 +33,11 @@ class AuthHandler:
                 username, password = account.split(":", 1)
                 self.accounts[username] = password
 
+    @property
+    def is_configured(self) -> bool:
+        """Check if authentication is configured (has accounts defined)"""
+        return bool(self.accounts)
+
     def create_token(
         self,
         username: str,
