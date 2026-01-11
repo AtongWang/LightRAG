@@ -3454,18 +3454,58 @@ def create_document_routes(
                         "created_at": format_datetime(doc_data.get("created_at")),
                         "status": doc_data.get("status"),
                     }
-            elif file_ext in {'.doc', '.docx'}:
-                return {
-                    "doc_id": doc_id,
-                    "filename": full_path.name,
-                    "file_type": file_ext,
-                    "content_length": 0,
-                    "content": "Word文档格式，请下载后使用Microsoft Word或兼容软件查看",
-                    "content_type": "document",
-                    "is_full_content": False,
-                    "created_at": format_datetime(doc_data.get("created_at")),
-                    "status": doc_data.get("status"),
-                }
+            elif file_ext in {'.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'}:
+                # For Office documents, try to get extracted text from full_docs storage
+                full_doc_data = await rag.full_docs.get_by_id(doc_id)
+                if full_doc_data and full_doc_data.get("content"):
+                    content = full_doc_data.get("content", "")
+                    content_preview = content
+                    if len(content) > max_preview_length:
+                        content_preview = content[:max_preview_length] + "\n\n... (内容已截断)"
+                    
+                    file_type_names = {
+                        '.doc': 'Word文档',
+                        '.docx': 'Word文档',
+                        '.ppt': 'PowerPoint演示文稿',
+                        '.pptx': 'PowerPoint演示文稿',
+                        '.xls': 'Excel表格',
+                        '.xlsx': 'Excel表格',
+                    }
+                    file_type_name = file_type_names.get(file_ext, '文档')
+                    
+                    return {
+                        "doc_id": doc_id,
+                        "filename": full_path.name,
+                        "file_type": file_ext,
+                        "content_length": len(content),
+                        "content": content_preview,
+                        "content_type": "text",  # Display as text
+                        "is_full_content": len(content) <= max_preview_length,
+                        "created_at": format_datetime(doc_data.get("created_at")),
+                        "status": doc_data.get("status"),
+                        "note": f"以下为从{file_type_name}中提取的文本内容",
+                    }
+                else:
+                    file_type_names = {
+                        '.doc': 'Word文档',
+                        '.docx': 'Word文档',
+                        '.ppt': 'PowerPoint演示文稿',
+                        '.pptx': 'PowerPoint演示文稿',
+                        '.xls': 'Excel表格',
+                        '.xlsx': 'Excel表格',
+                    }
+                    file_type_name = file_type_names.get(file_ext, '文档')
+                    return {
+                        "doc_id": doc_id,
+                        "filename": full_path.name,
+                        "file_type": file_ext,
+                        "content_length": 0,
+                        "content": f"{file_type_name}格式，暂无提取内容，请下载后查看",
+                        "content_type": "document",
+                        "is_full_content": False,
+                        "created_at": format_datetime(doc_data.get("created_at")),
+                        "status": doc_data.get("status"),
+                    }
             else:
                 return {
                     "doc_id": doc_id,
@@ -3620,13 +3660,23 @@ def create_document_routes(
 
             # Return file for inline preview (not attachment)
             from fastapi.responses import FileResponse
+            from urllib.parse import quote
             response = FileResponse(
                 path=str(full_path),
                 media_type=media_type
             )
 
             # Set Content-Disposition to inline for preview
-            response.headers["Content-Disposition"] = f"inline; filename=\"{full_path.name}\""
+            # Use RFC 5987 encoding for non-ASCII filenames
+            filename = full_path.name
+            try:
+                filename.encode('ascii')
+                # ASCII filename, use simple format
+                response.headers["Content-Disposition"] = f"inline; filename=\"{filename}\""
+            except UnicodeEncodeError:
+                # Non-ASCII filename, use RFC 5987 encoding
+                encoded_filename = quote(filename, safe='')
+                response.headers["Content-Disposition"] = f"inline; filename*=UTF-8''{encoded_filename}"
 
             return response
 

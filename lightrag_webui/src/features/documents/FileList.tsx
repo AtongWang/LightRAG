@@ -10,6 +10,7 @@ import { zhCN } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
 import { getDocumentsPaginated, deleteDocuments, downloadDocument, viewDocument, reprocessFailedDocuments, type DocStatusResponse } from '@/api/lightrag'
 import { toast } from 'sonner'
+import DocumentViewer from '@/components/documents/DocumentViewer'
 
 interface DocumentFile {
   id: string
@@ -49,7 +50,6 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
   const [viewingDocument, setViewingDocument] = useState<DocumentViewData | null>(null)
   const [loadingView, setLoadingView] = useState(false)
   const [reprocessingDocs, setReprocessingDocs] = useState<Set<string>>(new Set())
-  const [previewError, setPreviewError] = useState(false)
 
   // Get the preview URL for documents
   const getPreviewUrl = (docId: string) => {
@@ -150,14 +150,12 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
 
   const handleView = async (fileId: string) => {
     setLoadingView(true)
-    setPreviewError(false)
     try {
       const docData = await viewDocument(fileId)
       setViewingDocument(docData)
     } catch (error) {
       toast.error('无法查看文档内容')
       console.error('Failed to view document:', error)
-      setPreviewError(true)
     } finally {
       setLoadingView(false)
     }
@@ -468,150 +466,12 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
 
       {/* 查看文档模态框 */}
       {viewingDocument && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setViewingDocument(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* 标题栏 */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-muted-foreground" />
-                <div>
-                  <h3 className="font-semibold text-lg">{viewingDocument.filename}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {viewingDocument.file_type} · {viewingDocument.content_type === 'text' ? `${viewingDocument.content_length} 字符` : `${(viewingDocument.content_length / 1024).toFixed(2)} KB`}
-                    {!viewingDocument.is_full_content && ' · 内容已截断'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setViewingDocument(null)}
-                className="p-2 hover:bg-muted rounded-md transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* 内容区域 - 根据类型显示不同内容 */}
-            <div className="flex-1 overflow-hidden p-4 bg-gray-50 dark:bg-gray-900">
-              {viewingDocument.content_type === 'text' && (
-                <div className="h-full overflow-auto">
-                  <pre className="whitespace-pre-wrap break-words text-sm font-mono bg-white dark:bg-gray-800 p-4 rounded-lg">
-                    {viewingDocument.content}
-                  </pre>
-                </div>
-              )}
-
-              {viewingDocument.content_type === 'pdf' && (
-                <div className="w-full h-full">
-                  {previewError ? (
-                    <div className="flex items-center justify-center h-full">
-                      <div className="text-center">
-                        <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                        <p className="text-muted-foreground mb-4">无法加载PDF预览</p>
-                        <button
-                          onClick={() => handleDownload(viewingDocument.doc_id)}
-                          className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
-                        >
-                          下载PDF文件
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <object
-                      data={getPreviewUrl(viewingDocument.doc_id)}
-                      type="application/pdf"
-                      className="w-full h-full rounded-lg"
-                      onError={() => setPreviewError(true)}
-                    >
-                      <div className="flex items-center justify-center h-full">
-                        <div className="text-center">
-                          <p className="text-muted-foreground mb-2">您的浏览器不支持PDF预览</p>
-                          <button
-                            onClick={() => handleDownload(viewingDocument.doc_id)}
-                            className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
-                          >
-                            下载PDF文件
-                          </button>
-                        </div>
-                      </div>
-                    </object>
-                  )}
-                </div>
-              )}
-
-              {viewingDocument.content_type === 'image' && (
-                <div className="w-full h-full flex items-center justify-center">
-                  <img
-                    src={getPreviewUrl(viewingDocument.doc_id)}
-                    alt={viewingDocument.filename}
-                    className="max-w-full max-h-full object-contain rounded-lg"
-                    onError={() => setPreviewError(true)}
-                  />
-                </div>
-              )}
-
-              {viewingDocument.content_type === 'document' && (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground mb-4">{viewingDocument.content}</p>
-                    <button
-                      onClick={() => handleDownload(viewingDocument.doc_id)}
-                      className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
-                    >
-                      下载文件
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {viewingDocument.content_type === 'binary' && (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground mb-4">{viewingDocument.content}</p>
-                    <button
-                      onClick={() => handleDownload(viewingDocument.doc_id)}
-                      className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition"
-                    >
-                      下载文件
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 底部操作栏 */}
-            <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-              <span className="text-sm text-muted-foreground">
-                上传时间: {formatDistanceToNow(new Date(viewingDocument.created_at), {
-                  addSuffix: true,
-                  locale: zhCN
-                })}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleDownload(viewingDocument.doc_id)}
-                  className="px-4 py-2 bg-[hsl(var(--vermillion))] text-white rounded-lg hover:bg-[hsl(var(--vermillion)/0.8)] transition flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  下载
-                </button>
-                <button
-                  onClick={() => setViewingDocument(null)}
-                  className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-muted transition"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DocumentViewer
+          doc={viewingDocument}
+          previewUrl={getPreviewUrl(viewingDocument.doc_id)}
+          onClose={() => setViewingDocument(null)}
+          onDownload={() => handleDownload(viewingDocument.doc_id)}
+        />
       )}
     </div>
   )
