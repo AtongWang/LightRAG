@@ -263,6 +263,7 @@ const useLightrangeGraph = () => {
   const queryLabel = useSettingsStore.use.queryLabel()
   const rawGraph = useGraphStore.use.rawGraph()
   const sigmaGraph = useGraphStore.use.sigmaGraph()
+  const lastSuccessfulQueryLabel = useGraphStore.use.lastSuccessfulQueryLabel()
   const maxQueryDepth = useSettingsStore.use.graphQueryMaxDepth()
   const maxNodes = useSettingsStore.use.graphMaxNodes()
   const isFetching = useGraphStore.use.isFetching()
@@ -297,6 +298,9 @@ const useLightrangeGraph = () => {
   // Reset graph when query label is cleared
   useEffect(() => {
     if (!queryLabel && (rawGraph !== null || sigmaGraph !== null)) {
+      if (!lastSuccessfulQueryLabel) {
+        return
+      }
       const state = useGraphStore.getState()
       state.reset()
       state.setGraphDataFetchAttempted(false)
@@ -304,7 +308,7 @@ const useLightrangeGraph = () => {
       dataLoadedRef.current = false
       initialLoadRef.current = false
     }
-  }, [queryLabel, rawGraph, sigmaGraph])
+  }, [queryLabel, rawGraph, sigmaGraph, lastSuccessfulQueryLabel])
 
   // Graph data fetching logic
   useEffect(() => {

@@ -238,7 +238,7 @@ const GraphViewer = ({ hideGraphLabels = false }: GraphViewerProps) => {
         )}
 
         {showLegend && (
-          <div className="absolute bottom-10 right-2 z-0">
+          <div className="absolute bottom-10 right-2 z-20">
             <Legend className="bg-background/60 backdrop-blur-lg" />
           </div>
         )}

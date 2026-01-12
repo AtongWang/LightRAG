@@ -12,7 +12,7 @@ import GraphViewer from '@/features/GraphViewer'
 import { RefreshCw, BarChart3, X, Circle, Link2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getProjectGraph } from '@/api/meme-lab'
-import { getNodeColorByType } from '@/utils/graphColor'
+import { resolveNodeColor } from '@/utils/graphColor'
 import * as Constants from '@/lib/constants'
 
 // 从 RawGraph 创建 Sigma 可渲染的图
@@ -25,7 +25,7 @@ function createSigmaGraphFromRaw(rawGraph: RawGraph) {
   // 添加节点
   for (const rawNode of rawGraph.nodes) {
     graph.addNode(rawNode.id, {
-      label: rawNode.labels.join(', '),
+      label: rawNode.id,  // 使用节点 ID（即实体名称）作为显示标签
       color: rawNode.color,
       x: rawNode.x ?? Math.random(),
       y: rawNode.y ?? Math.random(),
@@ -113,6 +113,7 @@ export default function ProjectGraph() {
         console.log('Project has no graph data')
         // 创建空的 RawGraph
         const emptyGraph = new RawGraph()
+        useGraphStore.getState().setTypeColorMap(new Map<string, string>())
         useGraphStore.getState().setRawGraph(emptyGraph)
         useGraphStore.getState().setGraphIsEmpty(true)
         return
@@ -124,6 +125,7 @@ export default function ProjectGraph() {
       const edgeIdMap: Record<string, number> = {}
 
       // 处理节点
+      let typeColorMap = new Map<string, string>()
       for (let i = 0; i < data.nodes.length; i++) {
         const node = data.nodes[i]
         const nodeId = node.id || node.entity_name || `node_${i}`
@@ -138,6 +140,9 @@ export default function ProjectGraph() {
         delete properties.color
         delete properties.degree
 
+        const resolved = resolveNodeColor(node.entity_type, typeColorMap)
+        typeColorMap = resolved.map
+
         const processedNode = {
           id: nodeId,
           labels: [node.entity_type || 'Unknown'],
@@ -145,7 +150,7 @@ export default function ProjectGraph() {
           x: Math.random(),
           y: Math.random(),
           size: 10,
-          color: getNodeColorByType(node.entity_type),
+          color: resolved.color,
           degree: 0
         }
         rawGraph.nodes.push(processedNode as any)
@@ -203,8 +208,9 @@ export default function ProjectGraph() {
       
       // 创建 sigmaGraph（用于 GraphViewer 渲染）
       const sigmaGraph = createSigmaGraphFromRaw(rawGraph)
-      
+
       // 更新 store
+      useGraphStore.getState().setTypeColorMap(typeColorMap)
       useGraphStore.getState().setRawGraph(rawGraph)
       useGraphStore.getState().setSigmaGraph(sigmaGraph)
       useGraphStore.getState().setGraphIsEmpty(rawGraph.nodes.length === 0)
