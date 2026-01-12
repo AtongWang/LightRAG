@@ -142,7 +142,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             )
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         # Use provided embedding or compute it
         if query_embedding is not None:
@@ -155,20 +155,70 @@ class NanoVectorDBStorage(BaseVectorStorage):
             embedding = embedding[0]
 
         client = await self._get_client()
-        results = client.query(
-            query=embedding,
-            top_k=top_k,
-            better_than_threshold=self.cosine_better_than_threshold,
-        )
-        results = [
-            {
-                **{k: v for k, v in dp.items() if k != "vector"},
-                "id": dp["__id__"],
-                "distance": dp["__metrics__"],
-                "created_at": dp.get("__created_at__"),
-            }
-            for dp in results
-        ]
+        
+        # If ids filter is provided, search within filtered subset
+        if ids is not None and len(ids) > 0:
+            ids_set = set(ids)
+            # Get all matching data first, then filter by distance
+            storage = getattr(client, "_NanoVectorDB__storage")
+            filtered_data = [
+                dp for dp in storage["data"] 
+                if dp.get("__id__") in ids_set
+            ]
+            
+            if not filtered_data:
+                return []
+            
+            # Compute cosine similarity for filtered data
+            import numpy as np
+            query_vec = np.array(embedding)
+            query_norm = np.linalg.norm(query_vec)
+            
+            results_with_scores = []
+            for dp in filtered_data:
+                # Get vector from data
+                data_vec = dp.get("__vector__")
+                if data_vec is None:
+                    continue
+                data_vec = np.array(data_vec)
+                data_norm = np.linalg.norm(data_vec)
+                if query_norm == 0 or data_norm == 0:
+                    continue
+                cosine_sim = np.dot(query_vec, data_vec) / (query_norm * data_norm)
+                
+                # Apply threshold filter
+                if cosine_sim >= self.cosine_better_than_threshold:
+                    results_with_scores.append((dp, cosine_sim))
+            
+            # Sort by similarity (descending) and take top_k
+            results_with_scores.sort(key=lambda x: x[1], reverse=True)
+            results_with_scores = results_with_scores[:top_k]
+            
+            results = [
+                {
+                    **{k: v for k, v in dp.items() if k not in ("vector", "__vector__")},
+                    "id": dp["__id__"],
+                    "distance": score,
+                    "created_at": dp.get("__created_at__"),
+                }
+                for dp, score in results_with_scores
+            ]
+        else:
+            # Original query without filtering
+            results = client.query(
+                query=embedding,
+                top_k=top_k,
+                better_than_threshold=self.cosine_better_than_threshold,
+            )
+            results = [
+                {
+                    **{k: v for k, v in dp.items() if k != "vector"},
+                    "id": dp["__id__"],
+                    "distance": dp["__metrics__"],
+                    "created_at": dp.get("__created_at__"),
+                }
+                for dp in results
+            ]
         return results
 
     @property

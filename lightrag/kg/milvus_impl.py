@@ -1071,7 +1071,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         # Ensure collection is loaded before querying
         self._ensure_collection_loaded()
@@ -1087,16 +1087,35 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         # Include all meta_fields (created_at is now always included)
         output_fields = list(self.meta_fields)
 
-        results = self._client.search(
-            collection_name=self.final_namespace,
-            data=embedding,
-            limit=top_k,
-            output_fields=output_fields,
-            search_params={
-                "metric_type": "COSINE",
-                "params": {"radius": self.cosine_better_than_threshold},
-            },
-        )
+        # Build filter expression if ids are provided
+        filter_expr = None
+        if ids is not None and len(ids) > 0:
+            # Escape and format IDs for Milvus filter expression
+            ids_str = ", ".join([f'"{id}"' for id in ids])
+            filter_expr = f"id in [{ids_str}]"
+
+        search_params = {
+            "metric_type": "COSINE",
+            "params": {"radius": self.cosine_better_than_threshold},
+        }
+
+        if filter_expr:
+            results = self._client.search(
+                collection_name=self.final_namespace,
+                data=embedding,
+                limit=top_k,
+                output_fields=output_fields,
+                search_params=search_params,
+                filter=filter_expr,
+            )
+        else:
+            results = self._client.search(
+                collection_name=self.final_namespace,
+                data=embedding,
+                limit=top_k,
+                output_fields=output_fields,
+                search_params=search_params,
+            )
         return [
             {
                 **dp["entity"],

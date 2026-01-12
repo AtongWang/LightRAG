@@ -135,6 +135,7 @@ export function ChatInterface() {
           chunk_top_k: querySettings.chunk_top_k,
           max_total_tokens: querySettings.max_total_tokens,
           enable_rerank: querySettings.enable_rerank,
+          project_id: currentProject?.project_id,
         },
         (chunk: string) => {
           // 流式更新助手消息

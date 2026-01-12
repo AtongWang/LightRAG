@@ -110,6 +110,11 @@ class QueryRequest(BaseModel):
         description="If True, enables streaming output for real-time responses. Only affects /query/stream endpoint.",
     )
 
+    project_id: Optional[str] = Field(
+        default=None,
+        description="Project ID for project-level query isolation. When provided, only retrieves knowledge from the specified project's documents.",
+    )
+
     @field_validator("query", mode="after")
     @classmethod
     def query_strip_after(cls, query: str) -> str:
@@ -129,17 +134,22 @@ class QueryRequest(BaseModel):
                 raise ValueError("Each message 'role' must be a non-empty string.")
         return conversation_history
 
-    def to_query_params(self, is_stream: bool) -> "QueryParam":
+    def to_query_params(self, is_stream: bool, chunk_ids: list[str] = None) -> "QueryParam":
         """Converts a QueryRequest instance into a QueryParam instance."""
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
         request_data = self.model_dump(
-            exclude_none=True, exclude={"query", "include_chunk_content"}
+            exclude_none=True, exclude={"query", "include_chunk_content", "project_id"}
         )
 
         # Ensure `mode` and `stream` are set explicitly
         param = QueryParam(**request_data)
         param.stream = is_stream
+        
+        # Set chunk_ids for project-level filtering
+        if chunk_ids:
+            param.chunk_ids = chunk_ids
+        
         return param
 
 
@@ -192,6 +202,55 @@ class StreamChunkResponse(BaseModel):
 
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
+
+    async def get_project_chunk_ids(project_id: str) -> list[str]:
+        """
+        Get all chunk IDs belonging to a specific project.
+        
+        Args:
+            project_id: The project ID to get chunks for
+            
+        Returns:
+            List of chunk IDs belonging to the project, or None if project not found
+        """
+        if not project_id:
+            return None
+            
+        try:
+            from lightrag.projects import ProjectManager
+            
+            kv_storage = rag.llm_response_cache
+            project_manager = ProjectManager(kv_storage)
+            
+            project = await project_manager.get(project_id)
+            if not project:
+                logger.warning(f"Project '{project_id}' not found for query filtering")
+                return None
+            
+            # Get all documents belonging to this project
+            doc_status_storage = rag.doc_status
+            docs_list, total_count = await doc_status_storage.get_docs_paginated(
+                project_id=project_id,
+                page=1,
+                page_size=10000  # Large enough to get all docs
+            )
+            
+            if not docs_list:
+                logger.info(f"No documents found for project '{project_id}'")
+                return []
+            
+            # Collect all chunk IDs from project documents
+            project_chunk_ids = []
+            for doc_id, doc_status in docs_list:
+                if doc_status.chunks_list:
+                    project_chunk_ids.extend(doc_status.chunks_list)
+            
+            logger.info(f"Project '{project_id}' has {len(project_chunk_ids)} chunks for query filtering")
+            return project_chunk_ids
+            
+        except Exception as e:
+            logger.error(f"Error getting project chunk IDs for '{project_id}': {e}")
+            return None
 
     @router.post(
         "/query",
@@ -402,8 +461,19 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - 500: Internal processing error (e.g., LLM service unavailable)
         """
         try:
+            # Get project chunk IDs for filtering if project_id is provided
+            chunk_ids = None
+            if request.project_id:
+                chunk_ids = await get_project_chunk_ids(request.project_id)
+                if chunk_ids is not None and len(chunk_ids) == 0:
+                    # Project has no documents yet
+                    return QueryResponse(
+                        response="该项目暂无文档，无法进行知识检索。请先上传文档。",
+                        references=None
+                    )
+            
             param = request.to_query_params(
-                False
+                False, chunk_ids=chunk_ids
             )  # Ensure stream=False for non-streaming endpoint
             # Force stream=False for /query endpoint regardless of include_references setting
             param.stream = False
@@ -660,9 +730,30 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             Use streaming mode for real-time interfaces and non-streaming for batch processing.
         """
         try:
+            # Get project chunk IDs for filtering if project_id is provided
+            chunk_ids = None
+            if request.project_id:
+                chunk_ids = await get_project_chunk_ids(request.project_id)
+                if chunk_ids is not None and len(chunk_ids) == 0:
+                    # Project has no documents yet - return error as stream
+                    from fastapi.responses import StreamingResponse
+                    
+                    async def empty_project_generator():
+                        yield f'{json.dumps({"response": "该项目暂无文档，无法进行知识检索。请先上传文档。"})}\n'
+                    
+                    return StreamingResponse(
+                        empty_project_generator(),
+                        media_type="application/x-ndjson",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Content-Type": "application/x-ndjson",
+                        },
+                    )
+            
             # Use the stream parameter from the request, defaulting to True if not specified
             stream_mode = request.stream if request.stream is not None else True
-            param = request.to_query_params(stream_mode)
+            param = request.to_query_params(stream_mode, chunk_ids=chunk_ids)
 
             from fastapi.responses import StreamingResponse
 
@@ -1139,7 +1230,20 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             as structured data analysis typically requires source attribution.
         """
         try:
-            param = request.to_query_params(False)  # No streaming for data endpoint
+            # Get project chunk IDs for filtering if project_id is provided
+            chunk_ids = None
+            if request.project_id:
+                chunk_ids = await get_project_chunk_ids(request.project_id)
+                if chunk_ids is not None and len(chunk_ids) == 0:
+                    # Project has no documents yet
+                    return QueryDataResponse(
+                        status="success",
+                        message="Project has no documents",
+                        data={"entities": [], "relationships": [], "chunks": [], "references": []},
+                        metadata={"query_mode": request.mode, "project_id": request.project_id}
+                    )
+            
+            param = request.to_query_params(False, chunk_ids=chunk_ids)  # No streaming for data endpoint
             response = await rag.aquery_data(request.query, param=param)
 
             # aquery_data returns the new format with status, message, data, and metadata

@@ -3467,7 +3467,7 @@ async def _get_vector_context(
     Args:
         query: The query string to search for
         chunks_vdb: Vector database containing document chunks
-        query_param: Query parameters including chunk_top_k and ids
+        query_param: Query parameters including chunk_top_k and chunk_ids for filtering
         query_embedding: Optional pre-computed query embedding to avoid redundant embedding calls
 
     Returns:
@@ -3477,13 +3477,17 @@ async def _get_vector_context(
         # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
+        
+        # Get chunk_ids filter from query_param
+        chunk_ids = getattr(query_param, 'chunk_ids', None)
 
         results = await chunks_vdb.query(
-            query, top_k=search_top_k, query_embedding=query_embedding
+            query, top_k=search_top_k, query_embedding=query_embedding, ids=chunk_ids
         )
         if not results:
+            filter_info = f", filtered by {len(chunk_ids)} chunk_ids" if chunk_ids else ""
             logger.info(
-                f"Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})"
+                f"Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold}{filter_info})"
             )
             return []
 
@@ -3499,8 +3503,9 @@ async def _get_vector_context(
                 }
                 valid_chunks.append(chunk_with_metadata)
 
+        filter_info = f", filtered by {len(chunk_ids)} chunk_ids" if chunk_ids else ""
         logger.info(
-            f"Naive query: {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})"
+            f"Naive query: {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold}{filter_info})"
         )
         return valid_chunks
 
@@ -3664,6 +3669,42 @@ async def _perform_kg_search(
             if rel_key not in seen_relations:
                 final_relations.append(relation)
                 seen_relations.add(rel_key)
+
+    # Filter by chunk_ids if provided (for project-level isolation)
+    chunk_ids = getattr(query_param, 'chunk_ids', None)
+    if chunk_ids is not None and len(chunk_ids) > 0:
+        chunk_ids_set = set(chunk_ids)
+        
+        # Filter entities by source_id
+        def entity_matches_chunks(entity: dict) -> bool:
+            source_id = entity.get("source_id", "")
+            if not source_id:
+                return False
+            # source_id may contain multiple chunk IDs separated by GRAPH_FIELD_SEP
+            from lightrag.constants import GRAPH_FIELD_SEP
+            entity_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
+            return bool(entity_chunk_ids & chunk_ids_set)
+        
+        filtered_entities = [e for e in final_entities if entity_matches_chunks(e)]
+        
+        # Filter relations by source_id
+        def relation_matches_chunks(relation: dict) -> bool:
+            source_id = relation.get("source_id", "")
+            if not source_id:
+                return False
+            from lightrag.constants import GRAPH_FIELD_SEP
+            relation_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
+            return bool(relation_chunk_ids & chunk_ids_set)
+        
+        filtered_relations = [r for r in final_relations if relation_matches_chunks(r)]
+        
+        logger.info(
+            f"Project filtering: {len(final_entities)} -> {len(filtered_entities)} entities, "
+            f"{len(final_relations)} -> {len(filtered_relations)} relations (by {len(chunk_ids)} chunk_ids)"
+        )
+        
+        final_entities = filtered_entities
+        final_relations = filtered_relations
 
     logger.info(
         f"Raw search results: {len(final_entities)} entities, {len(final_relations)} relations, {len(vector_chunks)} vector chunks"

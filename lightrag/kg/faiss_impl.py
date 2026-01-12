@@ -183,10 +183,11 @@ class FaissVectorDBStorage(BaseVectorStorage):
         return [m["__id__"] for m in list_data]
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         """
         Search by a textual query; returns top_k results with their metadata + similarity distance.
+        If ids is provided, only vectors with matching IDs will be considered.
         """
         if query_embedding is not None:
             embedding = np.array([query_embedding], dtype=np.float32)
@@ -199,9 +200,13 @@ class FaissVectorDBStorage(BaseVectorStorage):
 
         faiss.normalize_L2(embedding)  # we do in-place normalization
 
-        # Perform the similarity search
+        # If ids filter is provided, filter results after search
+        ids_set = set(ids) if ids else None
+
+        # Perform the similarity search (request more results if filtering)
         index = await self._get_index()
-        distances, indices = index.search(embedding, top_k)
+        search_top_k = top_k * 3 if ids_set else top_k  # Search more if filtering
+        distances, indices = index.search(embedding, min(search_top_k, index.ntotal))
 
         distances = distances[0]
         indices = indices[0]
@@ -217,16 +222,26 @@ class FaissVectorDBStorage(BaseVectorStorage):
                 continue
 
             meta = self._id_to_meta.get(idx, {})
+            custom_id = meta.get("__id__")
+            
+            # Apply ID filter if provided
+            if ids_set and custom_id not in ids_set:
+                continue
+
             # Filter out __vector__ from query results to avoid returning large vector data
             filtered_meta = {k: v for k, v in meta.items() if k != "__vector__"}
             results.append(
                 {
                     **filtered_meta,
-                    "id": meta.get("__id__"),
+                    "id": custom_id,
                     "distance": float(dist),
                     "created_at": meta.get("__created_at__"),
                 }
             )
+            
+            # Stop if we have enough results
+            if len(results) >= top_k:
+                break
 
         return results
 

@@ -138,6 +138,8 @@ export type QueryRequest = {
   user_prompt?: string
   /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True. */
   enable_rerank?: boolean
+  /** Project ID for project-level query isolation. When provided, only retrieves knowledge from the specified project's documents. */
+  project_id?: string
 }
 
 export type QueryResponse = {

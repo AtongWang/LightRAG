@@ -561,7 +561,7 @@ class QdrantVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         if query_embedding is not None:
             embedding = query_embedding
@@ -571,15 +571,25 @@ class QdrantVectorDBStorage(BaseVectorStorage):
             )  # higher priority for query
             embedding = embedding_result[0]
 
+        # Build filter conditions
+        filter_conditions = [workspace_filter_condition(self.effective_workspace)]
+        
+        # Add ID filter if provided
+        if ids is not None and len(ids) > 0:
+            filter_conditions.append(
+                models.FieldCondition(
+                    key=ID_FIELD,
+                    match=models.MatchAny(any=ids)
+                )
+            )
+
         results = self._client.query_points(
             collection_name=self.final_namespace,
             query=embedding,
             limit=top_k,
             with_payload=True,
             score_threshold=self.cosine_better_than_threshold,
-            query_filter=models.Filter(
-                must=[workspace_filter_condition(self.effective_workspace)]
-            ),
+            query_filter=models.Filter(must=filter_conditions),
         ).points
 
         return [

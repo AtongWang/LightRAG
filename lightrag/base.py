@@ -168,6 +168,12 @@ class QueryParam:
     containing citation information for the retrieved content.
     """
 
+    chunk_ids: list[str] | None = None
+    """Optional list of chunk IDs to filter search results.
+    When provided, only chunks with these IDs will be considered in vector search
+    and knowledge graph queries. Used for project-level query isolation.
+    """
+
 
 @dataclass
 class StorageNameSpace(ABC):
@@ -260,7 +266,7 @@ class BaseVectorStorage(StorageNameSpace, ABC):
 
     @abstractmethod
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         """Query the vector storage and retrieve top_k results.
 
@@ -269,6 +275,8 @@ class BaseVectorStorage(StorageNameSpace, ABC):
             top_k: Number of top results to return
             query_embedding: Optional pre-computed embedding for the query.
                            If provided, skips embedding computation for better performance.
+            ids: Optional list of IDs to filter results. If provided, only vectors
+                 with matching IDs will be considered in the search.
         """
 
     @abstractmethod

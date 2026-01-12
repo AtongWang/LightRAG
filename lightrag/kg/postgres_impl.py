@@ -2994,7 +2994,7 @@ class PGVectorStorage(BaseVectorStorage):
 
     #################### query method ###############
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         if query_embedding is not None:
             embedding = query_embedding
@@ -3006,15 +3006,63 @@ class PGVectorStorage(BaseVectorStorage):
 
         embedding_string = ",".join(map(str, embedding))
 
-        sql = SQL_TEMPLATES[self.namespace].format(
-            embedding_string=embedding_string, table_name=self.table_name
-        )
-        params = {
-            "workspace": self.workspace,
-            "closer_than_threshold": 1 - self.cosine_better_than_threshold,
-            "top_k": top_k,
-        }
-        results = await self.db.query(sql, params=list(params.values()), multirows=True)
+        # Build SQL with optional ID filter
+        if ids is not None and len(ids) > 0:
+            # Use custom SQL with ID filter
+            if self.namespace == "chunks":
+                sql = f"""
+                    SELECT c.id,
+                           c.content,
+                           c.file_path,
+                           EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
+                    FROM {self.table_name} c
+                    WHERE c.workspace = $1
+                      AND c.id = ANY($4)
+                      AND c.content_vector <=> '[{embedding_string}]'::vector < $2
+                    ORDER BY c.content_vector <=> '[{embedding_string}]'::vector
+                    LIMIT $3;
+                """
+            elif self.namespace == "entities":
+                sql = f"""
+                    SELECT e.entity_name,
+                           EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
+                    FROM {self.table_name} e
+                    WHERE e.workspace = $1
+                      AND e.id = ANY($4)
+                      AND e.content_vector <=> '[{embedding_string}]'::vector < $2
+                    ORDER BY e.content_vector <=> '[{embedding_string}]'::vector
+                    LIMIT $3;
+                """
+            elif self.namespace == "relationships":
+                sql = f"""
+                    SELECT r.source_id AS src_id,
+                           r.target_id AS tgt_id,
+                           EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at
+                    FROM {self.table_name} r
+                    WHERE r.workspace = $1
+                      AND r.id = ANY($4)
+                      AND r.content_vector <=> '[{embedding_string}]'::vector < $2
+                    ORDER BY r.content_vector <=> '[{embedding_string}]'::vector
+                    LIMIT $3;
+                """
+            else:
+                # Fallback to standard template without ID filter
+                sql = SQL_TEMPLATES[self.namespace].format(
+                    embedding_string=embedding_string, table_name=self.table_name
+                )
+                ids = None  # Reset to use standard params
+
+            if ids is not None:
+                params = [self.workspace, 1 - self.cosine_better_than_threshold, top_k, ids]
+            else:
+                params = [self.workspace, 1 - self.cosine_better_than_threshold, top_k]
+        else:
+            sql = SQL_TEMPLATES[self.namespace].format(
+                embedding_string=embedding_string, table_name=self.table_name
+            )
+            params = [self.workspace, 1 - self.cosine_better_than_threshold, top_k]
+
+        results = await self.db.query(sql, params=params, multirows=True)
         return results
 
     async def index_done_callback(self) -> None:

@@ -2233,7 +2233,7 @@ class MongoVectorDBStorage(BaseVectorStorage):
         return list_data
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None, ids: list[str] = None
     ) -> list[dict[str, Any]]:
         """Queries the vector database using Atlas Vector Search."""
         if query_embedding is not None:
@@ -2263,8 +2263,13 @@ class MongoVectorDBStorage(BaseVectorStorage):
             },
             {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
             {"$match": {"score": {"$gte": self.cosine_better_than_threshold}}},
-            {"$project": {"vector": 0}},
         ]
+
+        # Add ID filter if provided
+        if ids is not None and len(ids) > 0:
+            pipeline.append({"$match": {"_id": {"$in": ids}}})
+
+        pipeline.append({"$project": {"vector": 0}})
 
         # Execute the aggregation pipeline
         cursor = await self._data.aggregate(pipeline, allowDiskUse=True)
