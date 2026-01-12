@@ -5,12 +5,72 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
+import { UndirectedGraph } from 'graphology'
 import { useGraphStore, RawGraph } from '@/stores/graph'
+import { useSettingsStore } from '@/stores/settings'
 import GraphViewer from '@/features/GraphViewer'
 import { RefreshCw, BarChart3, X, Circle, Link2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getProjectGraph } from '@/api/meme-lab'
 import { getNodeColorByType } from '@/utils/graphColor'
+import * as Constants from '@/lib/constants'
+
+// 从 RawGraph 创建 Sigma 可渲染的图
+function createSigmaGraphFromRaw(rawGraph: RawGraph) {
+  const minEdgeSize = useSettingsStore.getState().minEdgeSize
+  const maxEdgeSize = useSettingsStore.getState().maxEdgeSize
+  
+  const graph = new UndirectedGraph()
+
+  // 添加节点
+  for (const rawNode of rawGraph.nodes) {
+    graph.addNode(rawNode.id, {
+      label: rawNode.labels.join(', '),
+      color: rawNode.color,
+      x: rawNode.x ?? Math.random(),
+      y: rawNode.y ?? Math.random(),
+      size: rawNode.size,
+      borderColor: Constants.nodeBorderColor,
+      borderSize: 0.2
+    })
+  }
+
+  // 计算边的权重范围
+  let minWeight = Number.MAX_SAFE_INTEGER
+  let maxWeight = 0
+  for (const rawEdge of rawGraph.edges) {
+    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
+    minWeight = Math.min(minWeight, weight)
+    maxWeight = Math.max(maxWeight, weight)
+  }
+  const weightRange = maxWeight - minWeight
+
+  // 添加边
+  for (const rawEdge of rawGraph.edges) {
+    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
+    
+    // 计算边大小
+    let edgeSize = minEdgeSize
+    if (weightRange > 0) {
+      const sizeScale = maxEdgeSize - minEdgeSize
+      edgeSize = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5)
+    }
+
+    try {
+      rawEdge.dynamicId = graph.addEdge(rawEdge.source, rawEdge.target, {
+        label: rawEdge.properties?.keywords || undefined,
+        size: edgeSize,
+        originalWeight: weight,
+        type: 'curvedNoArrow'
+      })
+    } catch (e) {
+      // 忽略重复边错误
+      console.warn(`Skipping duplicate edge: ${rawEdge.source} -> ${rawEdge.target}`)
+    }
+  }
+
+  return graph
+}
 
 export default function ProjectGraph() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -19,6 +79,13 @@ export default function ProjectGraph() {
   const [showStats, setShowStats] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 进入项目图谱页面时，清空全局 queryLabel，防止 useLightragGraph 钩子触发全局图谱获取
+  useEffect(() => {
+    // 清空 queryLabel 并重置相关状态
+    useSettingsStore.getState().setQueryLabel('')
+    useGraphStore.getState().setGraphDataFetchAttempted(true) // 阻止自动获取
+  }, [])
 
   // Calculate stats from graph data
   const nodeCount = rawGraph?.nodes?.length || 0
@@ -134,8 +201,12 @@ export default function ProjectGraph() {
 
       console.log(`Loaded ${rawGraph.nodes.length} nodes, ${rawGraph.edges.length} edges for project ${projectId}`)
       
+      // 创建 sigmaGraph（用于 GraphViewer 渲染）
+      const sigmaGraph = createSigmaGraphFromRaw(rawGraph)
+      
       // 更新 store
       useGraphStore.getState().setRawGraph(rawGraph)
+      useGraphStore.getState().setSigmaGraph(sigmaGraph)
       useGraphStore.getState().setGraphIsEmpty(rawGraph.nodes.length === 0)
 
     } catch (err) {
@@ -219,9 +290,9 @@ export default function ProjectGraph() {
           </div>
         )}
 
-        {/* GraphViewer - 全屏显示 */}
+        {/* GraphViewer - 全屏显示，隐藏 GraphLabels 因为我们使用项目特定的图谱数据 */}
         <div className="absolute inset-0">
-          <GraphViewer />
+          <GraphViewer hideGraphLabels />
         </div>
 
         {/* 统计面板 - 悬浮在右下角 */}

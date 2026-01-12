@@ -28,6 +28,12 @@ import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
 
+// Props for GraphViewer
+interface GraphViewerProps {
+  /** 是否隐藏 GraphLabels 组件（用于项目图谱视图） */
+  hideGraphLabels?: boolean
+}
+
 // Function to create sigma settings based on theme
 const createSigmaSettings = (isDarkTheme: boolean): Partial<SigmaSettings> => ({
   allowInvalidContainer: true,
@@ -107,7 +113,7 @@ const GraphEvents = () => {
   return null
 }
 
-const GraphViewer = () => {
+const GraphViewer = ({ hideGraphLabels = false }: GraphViewerProps) => {
   const [isThemeSwitching, setIsThemeSwitching] = useState(false)
   const sigmaRef = useRef<any>(null)
   const prevTheme = useRef<string>('')
@@ -206,7 +212,7 @@ const GraphViewer = () => {
         <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 
         <div className="absolute top-2 left-2 flex items-start gap-2">
-          <GraphLabels />
+          {!hideGraphLabels && <GraphLabels />}
           {showNodeSearchBar && !isThemeSwitching && (
             <GraphSearch
               value={searchInitSelectedNode}

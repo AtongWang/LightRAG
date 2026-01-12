@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { TableView } from '@/features/table'
 import { useGraphStore, RawGraph } from '@/stores/graph'
+import { useSettingsStore } from '@/stores/settings'
 import { getProjectGraph } from '@/api/meme-lab'
 import { getNodeColorByType } from '@/utils/graphColor'
 import { RefreshCw, AlertCircle } from 'lucide-react'
@@ -19,6 +20,12 @@ export default function ProjectTable() {
   const [error, setError] = useState<string | null>(null)
   const rawGraph = useGraphStore.use.rawGraph()
   const graphDataVersion = useGraphStore.use.graphDataVersion()
+
+  // 进入项目表格页面时，清空全局 queryLabel，防止全局图谱获取覆盖项目数据
+  useEffect(() => {
+    useSettingsStore.getState().setQueryLabel('')
+    useGraphStore.getState().setGraphDataFetchAttempted(true)
+  }, [])
 
   // 加载项目图谱数据（如果还没有加载）
   const loadProjectGraph = useCallback(async () => {
