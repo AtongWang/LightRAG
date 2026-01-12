@@ -96,7 +96,8 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
           file_size: doc.content_length || 0,
           upload_time: doc.created_at,
           status: statusMap[doc.status] || 'pending',
-          entity_count: doc.chunks_count,
+          entity_count: doc.entity_count ?? 0,
+          relation_count: doc.relation_count ?? 0,
           error_message: doc.error_msg
         }
       })

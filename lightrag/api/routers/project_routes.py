@@ -4,12 +4,15 @@
 """
 
 from typing import List, Optional
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel, Field
 
 from lightrag import LightRAG
 from lightrag.projects import ProjectManager
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.utils import logger
+from lightrag.constants import GRAPH_FIELD_SEP
 
 
 # Request/Response Models
@@ -29,6 +32,14 @@ class UpdateProjectRequest(BaseModel):
     tags: Optional[List[str]] = Field(None, description="标签列表")
 
 
+class ProjectStats(BaseModel):
+    """项目统计"""
+    document_count: int = 0
+    entity_count: int = 0
+    relation_count: int = 0
+    last_updated: Optional[str] = None
+
+
 class ProjectResponse(BaseModel):
     """项目响应"""
     project_id: str
@@ -41,6 +52,7 @@ class ProjectResponse(BaseModel):
     status: str
     cover_image: Optional[str] = None
     tags: List[str] = []
+    stats: Optional[ProjectStats] = None
 
 
 def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
@@ -60,6 +72,70 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
 
     # Create combined auth dependency
     combined_auth = get_combined_auth_dependency(api_key)
+
+    async def get_project_stats(project) -> ProjectStats:
+        stats = ProjectStats(last_updated=project.updated_at)
+        try:
+            docs_list = []
+            try:
+                docs_list, total_docs = await rag.doc_status.get_docs_paginated(
+                    project_id=project.project_id,
+                    page=1,
+                    page_size=10000,
+                )
+                stats.document_count = total_docs
+            except Exception as e:
+                logger.warning(f"Failed to get document count for project {project.project_id}: {e}")
+
+            if not docs_list:
+                return stats
+
+            project_chunk_ids = set()
+            for _, doc_status in docs_list:
+                if doc_status.chunks_list:
+                    project_chunk_ids.update(doc_status.chunks_list)
+
+            if not project_chunk_ids:
+                return stats
+
+            try:
+                graph_storage = rag.chunk_entity_relation_graph
+                all_nodes = await graph_storage.get_all_nodes()
+                all_edges = await graph_storage.get_all_edges()
+
+                def node_belongs_to_project(node: dict) -> bool:
+                    source_id = node.get("source_id", "")
+                    if not source_id:
+                        return False
+                    node_chunk_ids = set(
+                        cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip()
+                    )
+                    return bool(node_chunk_ids & project_chunk_ids)
+
+                filtered_nodes = [node for node in all_nodes if node_belongs_to_project(node)]
+                filtered_node_ids = set(
+                    node.get("id", node.get("entity_name", "")) for node in filtered_nodes
+                )
+
+                def edge_belongs_to_project(edge: dict) -> bool:
+                    src = edge.get("source", edge.get("src_id", ""))
+                    tgt = edge.get("target", edge.get("tgt_id", ""))
+                    return src in filtered_node_ids and tgt in filtered_node_ids
+
+                filtered_edges = [edge for edge in all_edges if edge_belongs_to_project(edge)]
+
+                stats.entity_count = len(filtered_nodes)
+                stats.relation_count = len(filtered_edges)
+            except Exception as e:
+                logger.warning(f"Failed to compute graph stats for project {project.project_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to compute stats for project {project.project_id}: {e}")
+
+        return stats
+
+    async def build_project_response(project) -> ProjectResponse:
+        stats = await get_project_stats(project)
+        return ProjectResponse(**project.to_dict(), stats=stats)
 
     @router.post(
         "/create",
@@ -82,7 +158,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
                 tags=request.tags or [],
             )
 
-            return ProjectResponse(**project.to_dict())
+            return await build_project_response(project)
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -105,7 +181,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
             if not project:
                 raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
-            return ProjectResponse(**project.to_dict())
+            return await build_project_response(project)
 
         except HTTPException:
             raise
@@ -128,7 +204,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
 
             projects = await project_manager.list_all()
 
-            return [ProjectResponse(**p.to_dict()) for p in projects]
+            return await asyncio.gather(*(build_project_response(p) for p in projects))
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -163,7 +239,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
 
             project = await project_manager.update(project_id, **update_data)
 
-            return ProjectResponse(**project.to_dict())
+            return await build_project_response(project)
 
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))

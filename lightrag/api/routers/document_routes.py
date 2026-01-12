@@ -32,6 +32,7 @@ from lightrag.utils import (
     sanitize_text_for_encoding,
 )
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.constants import GRAPH_FIELD_SEP
 from ..config import global_args
 
 
@@ -443,6 +444,12 @@ class DocStatusResponse(BaseModel):
     )
     chunks_count: Optional[int] = Field(
         default=None, description="Number of chunks the document was split into"
+    )
+    entity_count: int = Field(
+        default=0, description="Number of entities extracted for this document"
+    )
+    relation_count: int = Field(
+        default=0, description="Number of relations extracted for this document"
     )
     error_msg: Optional[str] = Field(
         default=None, description="Error message if processing failed"
@@ -3026,6 +3033,70 @@ def create_document_routes(
                 docs_task, status_counts_task
             )
 
+            doc_entity_counts: dict[str, int] = {}
+            doc_relation_counts: dict[str, int] = {}
+            chunk_to_docs: dict[str, set[str]] = {}
+
+            for doc_id, doc in documents_with_ids:
+                doc_entity_counts[doc_id] = 0
+                doc_relation_counts[doc_id] = 0
+                if not doc.chunks_list:
+                    continue
+                for chunk_id in doc.chunks_list:
+                    if not chunk_id:
+                        continue
+                    chunk_to_docs.setdefault(chunk_id, set()).add(doc_id)
+
+            if chunk_to_docs:
+                try:
+                    graph_storage = rag.chunk_entity_relation_graph
+                    all_nodes, all_edges = await asyncio.gather(
+                        graph_storage.get_all_nodes(),
+                        graph_storage.get_all_edges(),
+                    )
+
+                    doc_node_ids: dict[str, set[str]] = {doc_id: set() for doc_id in doc_entity_counts}
+                    doc_edge_ids: dict[str, set[str]] = {doc_id: set() for doc_id in doc_relation_counts}
+
+                    for node in all_nodes:
+                        source_id = node.get("source_id", "")
+                        if not source_id:
+                            continue
+                        node_id = node.get("id", node.get("entity_name", ""))
+                        if not node_id:
+                            continue
+                        for chunk_id in source_id.split(GRAPH_FIELD_SEP):
+                            chunk_id = chunk_id.strip()
+                            if not chunk_id:
+                                continue
+                            for doc_id in chunk_to_docs.get(chunk_id, []):
+                                doc_node_ids[doc_id].add(node_id)
+
+                    for edge in all_edges:
+                        source_id = edge.get("source_id", "")
+                        if not source_id:
+                            continue
+                        edge_id = edge.get("id")
+                        if not edge_id:
+                            src = edge.get("source", edge.get("src_id", ""))
+                            tgt = edge.get("target", edge.get("tgt_id", ""))
+                            if src or tgt:
+                                edge_id = f"{src}-{tgt}"
+                        if not edge_id:
+                            continue
+                        for chunk_id in source_id.split(GRAPH_FIELD_SEP):
+                            chunk_id = chunk_id.strip()
+                            if not chunk_id:
+                                continue
+                            for doc_id in chunk_to_docs.get(chunk_id, []):
+                                doc_edge_ids[doc_id].add(edge_id)
+
+                    for doc_id in doc_entity_counts:
+                        doc_entity_counts[doc_id] = len(doc_node_ids.get(doc_id, set()))
+                        doc_relation_counts[doc_id] = len(doc_edge_ids.get(doc_id, set()))
+                except Exception as e:
+                    logger.warning(f"Failed to compute document graph counts: {e}")
+
             # Convert documents to response format
             doc_responses = []
             for doc_id, doc in documents_with_ids:
@@ -3039,6 +3110,8 @@ def create_document_routes(
                         updated_at=format_datetime(doc.updated_at),
                         track_id=doc.track_id,
                         chunks_count=doc.chunks_count,
+                        entity_count=doc_entity_counts.get(doc_id, 0),
+                        relation_count=doc_relation_counts.get(doc_id, 0),
                         error_msg=doc.error_msg,
                         metadata=doc.metadata,
                         file_path=doc.file_path,
