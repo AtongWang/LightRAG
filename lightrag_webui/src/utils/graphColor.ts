@@ -226,3 +226,12 @@ export const resolveNodeColor = (
 }
 
 export { DEFAULT_NODE_COLOR }
+
+/**
+ * Simple helper to get node color by type without needing access to graph store
+ * Uses resolveNodeColor internally with a temporary map
+ */
+export const getNodeColorByType = (nodeType: string | undefined): string => {
+  const { color } = resolveNodeColor(nodeType, undefined)
+  return color
+}

@@ -165,8 +165,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         """
         Retrieve the knowledge graph for a specific project.
 
-        This endpoint returns all nodes and edges associated with a project's workspace.
-        Useful for visualizing project-specific knowledge graphs.
+        This endpoint returns only nodes and edges that belong to the specified project,
+        filtered by the chunks associated with project documents.
 
         Args:
             project_id (str): The project ID to get graph for
@@ -179,6 +179,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         try:
             # Get project workspace
             from lightrag.projects import ProjectManager
+            from lightrag.constants import GRAPH_FIELD_SEP
             kv_storage = rag.llm_response_cache
             project_manager = ProjectManager(kv_storage)
 
@@ -188,28 +189,104 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
                     status_code=404, detail=f"Project '{project_id}' not found"
                 )
 
-            # Get all nodes from the graph storage
+            # Step 1: Get all documents belonging to this project
+            doc_status_storage = rag.doc_status
+            # Use get_docs_paginated with a large page_size to get all project documents
+            docs_list, total_count = await doc_status_storage.get_docs_paginated(
+                project_id=project_id,
+                page=1,
+                page_size=10000  # Large enough to get all docs
+            )
+
+            if not docs_list:
+                logger.info(f"No documents found for project '{project_id}'")
+                return {"nodes": [], "edges": [], "is_truncated": False}
+
+            # Step 2: Collect all chunk IDs from project documents
+            project_chunk_ids = set()
+            for doc_id, doc_status in docs_list:
+                if doc_status.chunks_list:
+                    project_chunk_ids.update(doc_status.chunks_list)
+
+            if not project_chunk_ids:
+                logger.info(f"No chunks found for project '{project_id}'")
+                return {"nodes": [], "edges": [], "is_truncated": False}
+
+            logger.debug(f"Project '{project_id}' has {len(project_chunk_ids)} chunks")
+
+            # Step 3: Get all nodes and edges from graph storage
             graph_storage = rag.chunk_entity_relation_graph
 
-            # Try to get all nodes and edges
             try:
-                # Get popular labels to find starting points
-                labels = await graph_storage.get_popular_labels(limit=10)
+                all_nodes = await graph_storage.get_all_nodes()
+                all_edges = await graph_storage.get_all_edges()
+            except Exception as e:
+                logger.error(f"Error getting graph data: {str(e)}")
+                return {"nodes": [], "edges": [], "is_truncated": False}
 
-                if not labels:
-                    return {"nodes": [], "edges": []}
+            # Step 4: Filter nodes by source_id (chunks belonging to project)
+            def node_belongs_to_project(node: dict) -> bool:
+                """Check if a node belongs to the project based on source_id"""
+                source_id = node.get("source_id", "")
+                if not source_id:
+                    return False
+                # source_id may contain multiple chunk IDs separated by GRAPH_FIELD_SEP
+                node_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
+                # Check if any of the node's chunks belong to the project
+                return bool(node_chunk_ids & project_chunk_ids)
 
-                # Use the most popular label as starting point
-                result = await rag.get_knowledge_graph(
-                    node_label=labels[0],
-                    max_depth=max_depth,
-                    max_nodes=max_nodes,
+            filtered_nodes = [node for node in all_nodes if node_belongs_to_project(node)]
+
+            # Create a set of node IDs for edge filtering
+            filtered_node_ids = set(node.get("id", node.get("entity_name", "")) for node in filtered_nodes)
+
+            # Step 5: Filter edges - both source and target must be in filtered nodes
+            def edge_belongs_to_project(edge: dict) -> bool:
+                """Check if an edge connects nodes that belong to the project"""
+                src = edge.get("source", edge.get("src_id", ""))
+                tgt = edge.get("target", edge.get("tgt_id", ""))
+                return src in filtered_node_ids and tgt in filtered_node_ids
+
+            filtered_edges = [edge for edge in all_edges if edge_belongs_to_project(edge)]
+
+            # Step 6: Apply max_nodes limit (sort by node degree approximation)
+            is_truncated = False
+            if len(filtered_nodes) > max_nodes:
+                is_truncated = True
+                # Count edges for each node to approximate degree
+                node_degree = {}
+                for node in filtered_nodes:
+                    node_id = node.get("id", node.get("entity_name", ""))
+                    node_degree[node_id] = 0
+                for edge in filtered_edges:
+                    src = edge.get("source", edge.get("src_id", ""))
+                    tgt = edge.get("target", edge.get("tgt_id", ""))
+                    if src in node_degree:
+                        node_degree[src] += 1
+                    if tgt in node_degree:
+                        node_degree[tgt] += 1
+
+                # Sort nodes by degree (highest first)
+                filtered_nodes.sort(
+                    key=lambda n: node_degree.get(n.get("id", n.get("entity_name", "")), 0),
+                    reverse=True
                 )
-                return result
+                filtered_nodes = filtered_nodes[:max_nodes]
 
-            except AttributeError:
-                # If methods not available, return empty graph
-                return {"nodes": [], "edges": []}
+                # Update filtered_node_ids and re-filter edges
+                filtered_node_ids = set(node.get("id", node.get("entity_name", "")) for node in filtered_nodes)
+                filtered_edges = [edge for edge in filtered_edges if edge_belongs_to_project(edge)]
+
+            logger.info(
+                f"Project '{project_id}' graph: {len(filtered_nodes)} nodes, "
+                f"{len(filtered_edges)} edges (truncated: {is_truncated})"
+            )
+
+            return {
+                "nodes": filtered_nodes,
+                "edges": filtered_edges,
+                "is_truncated": is_truncated
+            }
 
         except HTTPException:
             raise
