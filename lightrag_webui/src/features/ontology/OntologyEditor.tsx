@@ -25,7 +25,7 @@ interface OntologyEditorProps {
 
 export function OntologyEditor({ projectId }: OntologyEditorProps) {
   const {
-    currentOntology,
+    ontologies,
     loading,
     error,
     validationError,
@@ -34,7 +34,8 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     updateOntology,
     deleteOntology,
     validateOntology: validateOntologyStore,
-    clearError
+    clearError,
+    setCurrentOntology
   } = useOntologyStore()
 
   const [activeTab, setActiveTab] = useState<'entities' | 'relations'>('entities')
@@ -55,17 +56,22 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
   // Working copy of the ontology
   const [workingOntology, setWorkingOntology] = useState<OntologySpec | null>(null)
+  const projectOntology = ontologies[projectId] || null
 
   useEffect(() => {
+    setWorkingOntology(null)
+    setHasChanges(false)
+    setEditingAttributesFor(null)
+    setEditingAttributeType('entity')
+    setValidationResult(null)
+    setCurrentOntology(null)
     fetchOntology(projectId)
-  }, [projectId, fetchOntology])
+  }, [projectId, fetchOntology, setCurrentOntology])
 
   useEffect(() => {
-    if (currentOntology) {
-      setWorkingOntology({ ...currentOntology })
-      setHasChanges(false)
-    }
-  }, [currentOntology])
+    setWorkingOntology(projectOntology ? { ...projectOntology } : null)
+    setHasChanges(false)
+  }, [projectOntology])
 
   const handleSave = async () => {
     if (!workingOntology) return
@@ -356,7 +362,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     )
   }
 
-  if (!workingOntology && !currentOntology) {
+  if (!workingOntology && !projectOntology) {
     return (
       <Card>
         <CardHeader>

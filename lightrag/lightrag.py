@@ -2241,6 +2241,7 @@ class LightRAG:
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,
                 text_chunks_storage=self.text_chunks,
+                doc_status_storage=self.doc_status,
             )
             return chunk_results
         except Exception as e:

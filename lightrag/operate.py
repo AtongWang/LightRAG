@@ -2816,6 +2816,7 @@ async def extract_entities(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
     text_chunks_storage: BaseKVStorage | None = None,
+    doc_status_storage: Any | None = None,
 ) -> list:
     # Check for cancellation at the start of entity extraction
     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -2838,9 +2839,23 @@ async def extract_entities(
     # Ontology-driven extraction: Load ontology if available
     ontology_injection = ""
     relation_types = None
-    kv_storage_instance = global_config.get("kv_storage")
+    # IMPORTANT: global_config['kv_storage'] is a storage class name (str), not an instance.
+    # Use llm_response_cache (a real BaseKVStorage instance) for ontology/project CRUD.
+    kv_storage_instance = llm_response_cache
     ontology_id = global_config["addon_params"].get("ontology_id")
     project_id = global_config["addon_params"].get("project_id")
+
+    # If caller didn't set addon_params, try to infer project_id from doc_status metadata.
+    if not project_id and doc_status_storage and ordered_chunks:
+        try:
+            first_chunk = ordered_chunks[0][1]
+            doc_id = first_chunk.get("full_doc_id") if isinstance(first_chunk, dict) else None
+            if doc_id:
+                doc_status = await doc_status_storage.get_by_id(doc_id)
+                doc_metadata = (doc_status or {}).get("metadata") or {}
+                project_id = doc_metadata.get("project_id")
+        except Exception as e:
+            logger.debug(f"Failed to infer project_id from doc_status metadata: {e}")
 
     if kv_storage_instance and (ontology_id or project_id):
         try:

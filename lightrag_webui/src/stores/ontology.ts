@@ -16,6 +16,7 @@ interface OntologyStore {
   // 状态
   ontologies: Record<string, OntologySpec> // projectId -> ontology
   currentOntology: OntologySpec | null
+  activeProjectId: string | null
   loading: boolean
   error: string | null
   validationError: string | null
@@ -37,20 +38,26 @@ export const useOntologyStore = create<OntologyStore>()(
       // 初始状态
       ontologies: {},
       currentOntology: null,
+      activeProjectId: null,
       loading: false,
       error: null,
       validationError: null,
 
       // 获取项目的本体
       fetchOntology: async (projectId: string) => {
-        set({ loading: true, error: null })
+        set({ loading: true, error: null, activeProjectId: projectId })
         try {
           // 直接通过项目ID获取本体
           const ontology = await api.getProjectOntology(projectId)
 
           set(state => ({
             ontologies: { ...state.ontologies, [projectId]: ontology },
-            currentOntology: ontology,
+            currentOntology:
+              state.activeProjectId === projectId &&
+              (!state.currentOntology ||
+                state.currentOntology.project_id === projectId)
+                ? ontology
+                : state.currentOntology,
             loading: false
           }))
         } catch (error: unknown) {
@@ -58,10 +65,19 @@ export const useOntologyStore = create<OntologyStore>()(
           const axiosError = error as { response?: { status?: number } }
           if (axiosError.response?.status === 404) {
             // This is not an error - project just doesn't have an ontology yet
-            set({
-              currentOntology: null,
-              loading: false,
-              error: null
+            set(state => {
+              const nextOntologies = { ...state.ontologies }
+              delete nextOntologies[projectId]
+              return {
+                ontologies: nextOntologies,
+                currentOntology:
+                  state.activeProjectId === projectId &&
+                  state.currentOntology?.project_id === projectId
+                    ? null
+                    : state.currentOntology,
+                loading: false,
+                error: null
+              }
             })
             return // Don't throw, this is expected
           }
@@ -121,8 +137,18 @@ export const useOntologyStore = create<OntologyStore>()(
           await api.updateOntology(ontologyId, data)
 
           set(state => {
+            const existingOntology = state.currentOntology?.ontology_id === ontologyId
+              ? state.currentOntology
+              : Object.values(state.ontologies).find(
+                ontology => ontology.ontology_id === ontologyId
+              )
+
+            if (!existingOntology) {
+              return { loading: false }
+            }
+
             const updated = {
-              ...state.currentOntology,
+              ...existingOntology,
               ...data,
               updated_at: new Date().toISOString()
             } as OntologySpec
@@ -132,7 +158,10 @@ export const useOntologyStore = create<OntologyStore>()(
                 ...state.ontologies,
                 [updated.project_id]: updated
               },
-              currentOntology: updated,
+              currentOntology:
+                state.currentOntology?.ontology_id === ontologyId
+                  ? updated
+                  : state.currentOntology,
               loading: false
             }
           })
