@@ -17,7 +17,7 @@ export default function MainLayout() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
-  const { isGuestMode, coreVersion, apiVersion, username, webuiTitle, webuiDescription } = useAuthStore()
+  const { isGuestMode, coreVersion, apiVersion, username } = useAuthStore()
 
   const handleApiKeyAlertOpenChange = useCallback((open: boolean) => {
     setApiKeyAlertOpen(open)
@@ -42,8 +42,6 @@ export default function MainLayout() {
         coreVersion={coreVersion}
         apiVersion={apiVersion}
         username={username}
-        webuiTitle={webuiTitle}
-        webuiDescription={webuiDescription}
       />
 
       {/* 主内容区域 - 使用 flex-1 + min-h-0 + overflow-hidden 让子组件控制滚动 */}

@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Home,
   Scroll,
-  Settings,
   Link2
 } from 'lucide-react'
 import type { Project } from '@/types/project'
@@ -133,24 +132,22 @@ export default function ProjectLayout() {
 
       {/* 面包屑 + 标签页导航 */}
       <div className="border-b border-[hsl(var(--border))] bg-white/50 dark:bg-[hsl(var(--card)/0.5)] backdrop-blur-sm">
-        {/* 面包屑导航 */}
-        <div className="px-6 py-2 flex items-center text-sm">
-          <Link to="/" className="flex items-center gap-1 text-muted-foreground hover:text-[hsl(var(--vermillion))] transition-colors">
-            <Home className="w-3.5 h-3.5" />
-            <span>主题库</span>
-          </Link>
-          <ChevronRight className="w-4 h-4 mx-2 text-muted-foreground/50" />
-          <span className="font-medium text-foreground">{currentProject.name}</span>
-          <ChevronRight className="w-4 h-4 mx-2 text-muted-foreground/50" />
-          <span className="text-[hsl(var(--vermillion))]">
-            {t(`project.tabs.${currentTab}`, currentTab === 'documents' ? '文档' : currentTab === 'ontology' ? '本体' : currentTab === 'graph' ? '图谱' : currentTab === 'table' ? '表格' : '对话')}
-          </span>
-        </div>
+        <div className="px-6 py-1.5 flex flex-wrap items-center gap-3">
+          <div className="flex items-center text-sm min-w-[220px]">
+            <Link to="/" className="flex items-center gap-1 text-muted-foreground hover:text-[hsl(var(--vermillion))] transition-colors">
+              <Home className="w-3.5 h-3.5" />
+              <span>主题库</span>
+            </Link>
+            <ChevronRight className="w-4 h-4 mx-2 text-muted-foreground/50" />
+            <span className="font-medium text-foreground">{currentProject.name}</span>
+            <ChevronRight className="w-4 h-4 mx-2 text-muted-foreground/50" />
+            <span className="text-[hsl(var(--vermillion))]">
+              {t(`project.tabs.${currentTab}`, currentTab === 'documents' ? '文档' : currentTab === 'ontology' ? '本体' : currentTab === 'graph' ? '图谱' : currentTab === 'table' ? '表格' : '对话')}
+            </span>
+          </div>
 
-        {/* 标签页导航 */}
-        <div className="px-6 pb-3">
-          <Tabs value={currentTab} className="w-full">
-            <TabsList className="h-auto bg-transparent p-0 gap-2">
+          <Tabs value={currentTab} className="flex-1 min-w-[280px]">
+            <TabsList className="h-auto bg-transparent p-0 gap-2 flex-wrap justify-end">
               <NavigationTab 
                 value="documents" 
                 currentTab={currentTab} 
@@ -216,12 +213,12 @@ function ProjectHeader({ project }: { project: Project }) {
         </div>
       </div>
 
-      <div className="relative px-6 py-5">
-        <div className="flex items-start gap-5">
+      <div className="relative px-6 py-2.5">
+        <div className="flex items-center gap-4">
           {/* 项目图标 */}
           <div className="relative flex-shrink-0">
-            <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-[hsl(var(--vermillion))] to-[hsl(var(--vermillion-dark))] flex items-center justify-center shadow-lg shadow-[hsl(var(--vermillion)/0.3)]">
-              <Scroll className="w-8 h-8 text-white" />
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[hsl(var(--vermillion))] to-[hsl(var(--vermillion-dark))] flex items-center justify-center shadow-md shadow-[hsl(var(--vermillion)/0.25)]">
+              <Scroll className="w-6 h-6 text-white" />
             </div>
             {/* 装饰角 */}
             <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-[hsl(var(--gold))]" />
@@ -230,8 +227,8 @@ function ProjectHeader({ project }: { project: Project }) {
 
           {/* 项目信息 */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-[hsl(var(--foreground))] to-[hsl(var(--ink-light))] bg-clip-text text-transparent truncate">
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-[hsl(var(--foreground))] to-[hsl(var(--ink-light))] bg-clip-text text-transparent truncate">
                 {project.name}
               </h1>
               <span className={cn(
@@ -244,21 +241,21 @@ function ProjectHeader({ project }: { project: Project }) {
               </span>
             </div>
             
-            <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+            <p className="text-sm text-muted-foreground mb-2 line-clamp-1">
               {project.description || '探索文化知识，构建知识图谱'}
             </p>
 
             {/* 统计信息 */}
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-3">
               <StatBadge
                 icon={<FileTextIcon className="w-4 h-4" />}
-                value={project.stats?.document_count || project.documentCount || 0}
+                value={project.stats?.document_count || 0}
                 label="文档"
                 color="gold"
               />
               <StatBadge
                 icon={<NetworkIcon className="w-4 h-4" />}
-                value={project.stats?.entity_count || project.entityCount || 0}
+                value={project.stats?.entity_count || 0}
                 label="实体"
                 color="jade"
               />
@@ -268,30 +265,19 @@ function ProjectHeader({ project }: { project: Project }) {
                 label="关系"
                 color="vermillion"
               />
+              {project.tags && project.tags.length > 0 && project.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="px-2.5 py-1 text-xs font-medium bg-gradient-to-r from-[hsl(var(--vermillion)/0.1)] to-[hsl(var(--gold)/0.1)] text-[hsl(var(--vermillion-dark))] dark:text-[hsl(var(--vermillion-light))] rounded-full border border-[hsl(var(--vermillion)/0.2)]"
+                >
+                  {tag}
+                </span>
+              ))}
             </div>
           </div>
 
-          {/* 操作按钮 */}
-          <div className="flex-shrink-0">
-            <button className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-              <Settings className="w-5 h-5" />
-            </button>
-          </div>
         </div>
 
-        {/* 标签 */}
-        {project.tags && project.tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-[hsl(var(--border)/0.5)]">
-            {project.tags.map((tag) => (
-              <span
-                key={tag}
-                className="px-3 py-1 text-xs font-medium bg-gradient-to-r from-[hsl(var(--vermillion)/0.1)] to-[hsl(var(--gold)/0.1)] text-[hsl(var(--vermillion-dark))] dark:text-[hsl(var(--vermillion-light))] rounded-full border border-[hsl(var(--vermillion)/0.2)]"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* 底部装饰线 */}
@@ -321,7 +307,7 @@ function StatBadge({
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-white/50 dark:bg-[hsl(var(--card)/0.5)] rounded-lg border border-[hsl(var(--border)/0.5)]">
+    <div className="flex items-center gap-2 px-2.5 py-1 bg-white/50 dark:bg-[hsl(var(--card)/0.5)] rounded-lg border border-[hsl(var(--border)/0.5)]">
       <span className={colorClasses[color]}>{icon}</span>
       <span className="font-semibold text-foreground">{value}</span>
       <span className="text-xs text-muted-foreground">{label}</span>

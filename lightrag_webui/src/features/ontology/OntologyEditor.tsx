@@ -480,11 +480,11 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
           <h2 className="text-2xl font-bold">{workingOntology.name}</h2>
-          <p className="text-muted-foreground mt-1">{workingOntology.description}</p>
-          <div className="flex items-center gap-2 mt-2">
+          <p className="text-muted-foreground mt-1 leading-relaxed">{workingOntology.description}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
             <Badge variant="outline">v{workingOntology.version}</Badge>
             <Badge variant="outline">{workingOntology.language === 'zh' ? '中文' : 'English'}</Badge>
             {hasChanges && (
@@ -492,7 +492,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
           <Button variant="outline" onClick={handleValidate} disabled={isValidating}>
             <Eye className="w-4 h-4 mr-2" />
             {isValidating ? '验证中...' : '验证'}

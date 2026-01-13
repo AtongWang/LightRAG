@@ -3,8 +3,7 @@
  * 中国风文化基因库品牌设计
  */
 
-import { SiteInfo, webuiPrefix } from '@/lib/constants'
-import AppSettings from '@/components/AppSettings'
+import { SiteInfo } from '@/lib/constants'
 import { useAuthStore } from '@/stores/state'
 import { useTranslation } from 'react-i18next'
 import { navigationService } from '@/services/navigation'
@@ -19,17 +18,13 @@ interface TopNavigationProps {
   coreVersion?: string | null
   apiVersion?: string | null
   username?: string | null
-  webuiTitle?: string | null
-  webuiDescription?: string | null
 }
 
 export default function TopNavigation({
   isGuestMode = false,
   coreVersion,
   apiVersion,
-  username,
-  webuiTitle,
-  webuiDescription
+  username
 }: TopNavigationProps) {
   const { t } = useTranslation()
 
@@ -73,26 +68,6 @@ export default function TopNavigation({
             </div>
           </Link>
           
-          {/* 项目标题 */}
-          {webuiTitle && (
-            <div className="flex items-center ml-4">
-              <div className="w-px h-6 bg-gradient-to-b from-transparent via-[hsl(var(--border))] to-transparent mx-3" />
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="font-medium text-sm text-foreground/80 hover:text-foreground cursor-default transition-colors">
-                      {webuiTitle}
-                    </span>
-                  </TooltipTrigger>
-                  {webuiDescription && (
-                    <TooltipContent side="bottom">
-                      {webuiDescription}
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          )}
         </div>
 
         {/* 中间：装饰元素 */}
@@ -147,8 +122,6 @@ export default function TopNavigation({
               <GithubIcon className="w-4 h-4" aria-hidden="true" />
             </a>
           </Button>
-          
-          <AppSettings />
           
           {!isGuestMode && username && (
             <>
