@@ -49,6 +49,28 @@ export function ProjectsList() {
     <div className="min-h-screen max-h-screen overflow-y-auto bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
       {/* 背景装饰 */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        {/* 光晕与纸感底纹 */}
+        <div
+          className="absolute inset-0 opacity-80"
+          style={{
+            backgroundImage:
+              'radial-gradient(circle at 20% 10%, hsl(var(--vermillion) / 0.10), transparent 45%), radial-gradient(circle at 80% 18%, hsl(var(--jade) / 0.08), transparent 45%), radial-gradient(circle at 30% 85%, hsl(var(--gold) / 0.10), transparent 40%)'
+          }}
+        />
+        <div
+          className="absolute inset-x-0 top-12 h-56 opacity-70"
+          style={{
+            backgroundImage:
+              'linear-gradient(180deg, hsl(var(--paper-warm) / 0.55) 0%, transparent 100%)'
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.18]"
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='180' viewBox='0 0 220 180'><path d='M30 10c40 24 40 64 0 88s-40 64 0 88' fill='none' stroke='rgba(140, 80, 60, 0.45)' stroke-width='2'/><path d='M190 10c-40 24-40 64 0 88s40 64 0 88' fill='none' stroke='rgba(140, 80, 60, 0.45)' stroke-width='2'/><g stroke='rgba(170, 120, 80, 0.45)' stroke-width='1.2'><line x1='50' y1='30' x2='170' y2='30'/><line x1='56' y1='58' x2='164' y2='58'/><line x1='62' y1='88' x2='158' y2='88'/><line x1='56' y1='118' x2='164' y2='118'/><line x1='50' y1='148' x2='170' y2='148'/></g></svg>\")"
+          }}
+        />
         {/* 左上角云纹 */}
         <div className="absolute -top-20 -left-20 w-80 h-80 opacity-[0.03]">
           <svg viewBox="0 0 200 200" className="w-full h-full text-[hsl(var(--vermillion))]">
