@@ -9,10 +9,9 @@ import {
   createColumnHelper,
   SortingState,
   ColumnFiltersState,
-  VisibilityState
 } from '@tanstack/react-table'
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter } from 'lucide-react'
-import { useGraphStore, RawNodeType } from '@/stores/graph'
+import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 
 /**
@@ -31,6 +30,11 @@ type TableRow = RawNodeType & {
   image_url?: string
 }
 
+type RelationRow = RawEdgeType & {
+  sourceLabel?: string
+  targetLabel?: string
+}
+
 interface TableViewProps {
   viewMode?: 'entities' | 'relations'
 }
@@ -41,10 +45,14 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
   const graphDataVersion = useGraphStore.use.graphDataVersion()
   const theme = useSettingsStore.use.theme()
 
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [globalFilter, setGlobalFilter] = useState('')
+  const [entitySorting, setEntitySorting] = useState<SortingState>([])
+  const [entityColumnFilters, setEntityColumnFilters] = useState<ColumnFiltersState>([])
+  const [entityGlobalFilter, setEntityGlobalFilter] = useState('')
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all')
+  const [relationSorting, setRelationSorting] = useState<SortingState>([])
+  const [relationColumnFilters, setRelationColumnFilters] = useState<ColumnFiltersState>([])
+  const [relationGlobalFilter, setRelationGlobalFilter] = useState('')
+  const [relationTypeFilter, setRelationTypeFilter] = useState<string>('all')
 
   // Get unique entity types for filter
   const entityTypes = useMemo(() => {
@@ -59,8 +67,20 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     return Array.from(types).sort()
   }, [rawGraph, graphDataVersion])
 
+  const relationTypes = useMemo(() => {
+    if (!rawGraph?.edges) return []
+    const types = new Set<string>()
+    rawGraph.edges.forEach(edge => {
+      const relationType = edge.type || edge.properties?.relation_type || edge.properties?.type
+      if (relationType) {
+        types.add(relationType)
+      }
+    })
+    return Array.from(types).sort()
+  }, [rawGraph, graphDataVersion])
+
   // Prepare table data
-  const tableData = useMemo<TableRow[]>(() => {
+  const nodeTableData = useMemo<TableRow[]>(() => {
     if (!rawGraph?.nodes) return []
 
     let nodes = [...rawGraph.nodes]
@@ -73,10 +93,37 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     return nodes
   }, [rawGraph, graphDataVersion, entityTypeFilter])
 
+  const relationTableData = useMemo<RelationRow[]>(() => {
+    if (!rawGraph?.edges) return []
+    const nodeMap = rawGraph.nodes.reduce<Record<string, RawNodeType>>((acc, node) => {
+      acc[node.id] = node
+      return acc
+    }, {})
+
+    let edges = [...rawGraph.edges]
+    if (relationTypeFilter !== 'all') {
+      edges = edges.filter(edge => {
+        const relationType = edge.type || edge.properties?.relation_type || edge.properties?.type
+        return relationType === relationTypeFilter
+      })
+    }
+
+    return edges.map(edge => ({
+      ...edge,
+      sourceLabel: nodeMap[edge.source]?.properties?.entity_name
+        || nodeMap[edge.source]?.properties?.name
+        || edge.source,
+      targetLabel: nodeMap[edge.target]?.properties?.entity_name
+        || nodeMap[edge.target]?.properties?.name
+        || edge.target
+    }))
+  }, [rawGraph, graphDataVersion, relationTypeFilter])
+
   // Define columns
   const columnHelper = createColumnHelper<TableRow>()
+  const relationColumnHelper = createColumnHelper<RelationRow>()
 
-  const columns = useMemo(() => [
+  const nodeColumns = useMemo(() => [
     columnHelper.accessor('id', {
       id: 'id',
       header: t('graphPanel.table.id', 'ID'),
@@ -138,18 +185,76 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     })
   ], [t])
 
+  const relationColumns = useMemo(() => [
+    relationColumnHelper.accessor('id', {
+      id: 'id',
+      header: t('graphPanel.table.id', 'ID'),
+      cell: info => info.getValue(),
+      size: 140
+    }),
+    relationColumnHelper.accessor(row => row.type || row.properties?.relation_type || row.properties?.type, {
+      id: 'relation_type',
+      header: t('graphPanel.table.relationType', 'Type'),
+      cell: info => info.getValue() || '-',
+      size: 160
+    }),
+    relationColumnHelper.accessor('sourceLabel', {
+      id: 'source',
+      header: t('graphPanel.table.source', 'Source'),
+      cell: info => info.getValue() || '-',
+      size: 220
+    }),
+    relationColumnHelper.accessor('targetLabel', {
+      id: 'target',
+      header: t('graphPanel.table.target', 'Target'),
+      cell: info => info.getValue() || '-',
+      size: 220
+    }),
+    relationColumnHelper.accessor(row => row.properties?.description || row.properties?.relation_description, {
+      id: 'description',
+      header: t('graphPanel.table.description', 'Description'),
+      cell: info => {
+        const value = info.getValue()
+        if (!value) return '-'
+        const truncated = String(value).length > 100
+          ? String(value).substring(0, 100) + '...'
+          : value
+        return truncated
+      },
+      size: 300
+    })
+  ], [t])
+
   // Create table instance
-  const table = useReactTable({
-    data: tableData,
-    columns,
+  const nodeTable = useReactTable({
+    data: nodeTableData,
+    columns: nodeColumns,
     state: {
-      sorting,
-      columnFilters,
-      globalFilter
+      sorting: entitySorting,
+      columnFilters: entityColumnFilters,
+      globalFilter: entityGlobalFilter
     },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
+    onSortingChange: setEntitySorting,
+    onColumnFiltersChange: setEntityColumnFilters,
+    onGlobalFilterChange: setEntityGlobalFilter,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    enableSorting: true,
+    enableFilters: true
+  })
+
+  const relationTable = useReactTable({
+    data: relationTableData,
+    columns: relationColumns,
+    state: {
+      sorting: relationSorting,
+      columnFilters: relationColumnFilters,
+      globalFilter: relationGlobalFilter
+    },
+    onSortingChange: setRelationSorting,
+    onColumnFiltersChange: setRelationColumnFilters,
+    onGlobalFilterChange: setRelationGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -162,8 +267,10 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     useGraphStore.getState().setSelectedNode(nodeId, true)
   }
 
-  const isDarkTheme = theme === 'dark' ||
-    (theme === 'system' && window.document.documentElement.classList.contains('dark'))
+  const handleRelationRowClick = (edge: RelationRow) => {
+    const edgeId = edge.dynamicId || edge.id
+    useGraphStore.getState().setSelectedEdge(edgeId)
+  }
 
   if (!rawGraph || !rawGraph.nodes || rawGraph.nodes.length === 0) {
     return (
@@ -175,6 +282,9 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     )
   }
 
+  const isRelationView = propViewMode === 'relations'
+  const activeTable = isRelationView ? relationTable : nodeTable
+
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Header */}
@@ -182,10 +292,14 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
         {/* Title and Stats */}
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">
-            {t('graphPanel.table.title', 'Node Table')}
+            {isRelationView
+              ? t('graphPanel.table.relationTitle', 'Relation Table')
+              : t('graphPanel.table.title', 'Node Table')}
           </h2>
           <span className="text-sm text-gray-500 dark:text-gray-400">
-            {t('graphPanel.table.nodeCount', '{{count}} nodes', { count: tableData.length })}
+            {isRelationView
+              ? t('graphPanel.table.relationCount', '{{count}} relations', { count: relationTableData.length })
+              : t('graphPanel.table.nodeCount', '{{count}} nodes', { count: nodeTableData.length })}
           </span>
         </div>
 
@@ -196,9 +310,11 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              value={globalFilter ?? ''}
-              onChange={e => setGlobalFilter(e.target.value)}
-              placeholder={t('graphPanel.table.searchPlaceholder', 'Search nodes...')}
+              value={isRelationView ? relationGlobalFilter ?? '' : entityGlobalFilter ?? ''}
+              onChange={e => (isRelationView ? setRelationGlobalFilter(e.target.value) : setEntityGlobalFilter(e.target.value))}
+              placeholder={isRelationView
+                ? t('graphPanel.table.searchRelationsPlaceholder', 'Search relations...')
+                : t('graphPanel.table.searchPlaceholder', 'Search nodes...')}
               className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
             />
           </div>
@@ -207,12 +323,12 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <select
-              value={entityTypeFilter}
-              onChange={e => setEntityTypeFilter(e.target.value)}
+              value={isRelationView ? relationTypeFilter : entityTypeFilter}
+              onChange={e => (isRelationView ? setRelationTypeFilter(e.target.value) : setEntityTypeFilter(e.target.value))}
               className="pl-10 pr-8 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background appearance-none cursor-pointer"
             >
               <option value="all">{t('graphPanel.table.allTypes', 'All Types')}</option>
-              {entityTypes.map(type => (
+              {(isRelationView ? relationTypes : entityTypes).map(type => (
                 <option key={type} value={type}>{type}</option>
               ))}
             </select>
@@ -224,7 +340,7 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
       <div className="flex-1 overflow-auto">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
-            {table.getHeaderGroups().map(headerGroup => (
+            {activeTable.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map(header => (
                   <th
@@ -252,21 +368,27 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
             ))}
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {table.getRowModel().rows.length === 0 ? (
+            {activeTable.getRowModel().rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={activeTable.getAllColumns().length}
                   className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
                 >
                   {t('graphPanel.table.noResults', 'No results found')}
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map(row => (
+              activeTable.getRowModel().rows.map(row => (
                 <tr
                   key={row.id}
                   className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                  onClick={() => handleRowClick(row.original.id)}
+                  onClick={() => {
+                    if (isRelationView) {
+                      handleRelationRowClick(row.original as RelationRow)
+                    } else {
+                      handleRowClick((row.original as TableRow).id)
+                    }
+                  }}
                 >
                   {row.getVisibleCells().map(cell => (
                     <td
@@ -291,10 +413,15 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
       <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
           <span>
-            {t('graphPanel.table.showing', 'Showing {{count}} of {{total}} nodes', {
-              count: table.getRowModel().rows.length,
-              total: tableData.length
-            })}
+            {isRelationView
+              ? t('graphPanel.table.showingRelations', 'Showing {{count}} of {{total}} relations', {
+                  count: relationTable.getRowModel().rows.length,
+                  total: relationTableData.length
+                })
+              : t('graphPanel.table.showing', 'Showing {{count}} of {{total}} nodes', {
+                  count: nodeTable.getRowModel().rows.length,
+                  total: nodeTableData.length
+                })}
           </span>
           <span>
             {t('graphPanel.table.clickToSelect', 'Click a row to select in graph')}

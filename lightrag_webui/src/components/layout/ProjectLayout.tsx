@@ -57,7 +57,7 @@ function NavigationTab({ value, currentTab, projectId, icon, label }: Navigation
 
 export default function ProjectLayout() {
   const { projectId } = useParams<{ projectId: string }>()
-  const { currentProject, getProject, loading } = useProjectStore()
+  const { currentProject, projects, getProject, fetchProjects, loading } = useProjectStore()
   const [currentTab, setCurrentTab] = useState('documents')
   const { t } = useTranslation()
   const location = useLocation()
@@ -68,6 +68,14 @@ export default function ProjectLayout() {
       getProject(projectId)
     }
   }, [projectId, getProject])
+
+  useEffect(() => {
+    if (!projectId || !currentProject || currentProject.cover_image || projects.length > 0) {
+      return
+    }
+
+    fetchProjects()
+  }, [projectId, currentProject, projects.length, fetchProjects])
 
   // 从URL路径中提取当前标签页
   useEffect(() => {
@@ -125,10 +133,35 @@ export default function ProjectLayout() {
     )
   }
 
+  // 获取封面图用于背景
+  const coverImageForBg = projects.find(p => p.project_id === currentProject.project_id)?.cover_image
+    || (projects.find(p => p.project_id === currentProject.project_id) as Project & { coverImage?: string } | undefined)?.coverImage
+    || currentProject.cover_image
+    || (currentProject as Project & { coverImage?: string }).coverImage
+
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
-      {/* 项目头部 */}
-      <ProjectHeader project={currentProject} />
+    <>
+      {/* 固定背景层 - 覆盖整个页面包括导航栏 */}
+      {coverImageForBg && (
+        <div className="fixed inset-0 pointer-events-none -z-50">
+          <div
+            className="absolute inset-0 bg-center bg-cover blur-md scale-105 opacity-85 saturate-100"
+            style={{ backgroundImage: `url(${coverImageForBg})` }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-br from-[hsl(var(--background))]/45 via-[hsl(var(--paper-warm))]/40 to-[hsl(var(--background))]/45" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[hsl(var(--background))]/30 via-transparent to-[hsl(var(--background))]/30" />
+        </div>
+      )}
+
+      <div className="flex h-full w-full flex-col overflow-hidden relative">
+        {/* 项目头部 */}
+      <ProjectHeader
+        project={currentProject}
+        coverImage={
+          projects.find(p => p.project_id === currentProject.project_id)?.cover_image
+          || (projects.find(p => p.project_id === currentProject.project_id) as Project & { coverImage?: string } | undefined)?.coverImage
+        }
+      />
 
       {/* 面包屑 + 标签页导航 */}
       <div className="border-b border-[hsl(var(--border))] bg-white/50 dark:bg-[hsl(var(--card)/0.5)] backdrop-blur-sm">
@@ -193,15 +226,35 @@ export default function ProjectLayout() {
         <Outlet />
       </div>
     </div>
+    </>
   )
 }
 
 /**
  * 项目头部组件 - 中国风设计
  */
-function ProjectHeader({ project }: { project: Project }) {
+function ProjectHeader({ project, coverImage }: { project: Project; coverImage?: string }) {
+  const headerCover = project.cover_image
+    || (project as Project & { coverImage?: string }).coverImage
+    || coverImage
+
   return (
-    <div className="relative border-b border-[hsl(var(--border))] bg-gradient-to-r from-[hsl(var(--card))] via-[hsl(var(--background))] to-[hsl(var(--card))] overflow-hidden">
+    <div className="relative border-b border-[hsl(var(--border))] overflow-hidden">
+      {headerCover ? (
+        <div className="absolute inset-0 pointer-events-none">
+          {/* 背景封面图 - 模糊处理 */}
+          <div
+            className="absolute inset-0 bg-center bg-cover blur-sm scale-100 opacity-75 saturate-100"
+            style={{ backgroundImage: `url(${headerCover})` }}
+          />
+          {/* 多层渐变叠加，让背景更柔和 */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[hsl(var(--background))]/60 via-[hsl(var(--background))]/45 to-[hsl(var(--background))]/60" />
+          <div className="absolute inset-0 bg-gradient-to-br from-[hsl(var(--paper-warm))]/40 via-transparent to-[hsl(var(--paper-warm))]/20" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[hsl(var(--background))]/45 via-transparent to-transparent" />
+        </div>
+      ) : (
+        <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-brand-primary/10 via-[hsl(var(--background))] to-brand-secondary/10" />
+      )}
       {/* 背景装饰 */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-0 right-0 w-64 h-64 opacity-[0.03]">
