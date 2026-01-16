@@ -111,6 +111,14 @@
         "removeFile": "Remove file",
         "uploadDescription": "You can upload {{isMultiple ? 'multiple' : count}} files (up to {{maxSize}} each)",
         "duplicateFile": "File name already exists in server cache"
+      },
+      "multimodal": {
+        "label": "Enhanced Multimodal Parsing",
+        "description": "Extract images, tables and equations with AI descriptions",
+        "tooltip": "Uses MinerU parser for structured document parsing. Requires MinerU Docker service to be running.",
+        "checking": "Checking...",
+        "unavailable": "Unavailable",
+        "unavailableHint": "Start MinerU Docker service: docker compose --profile api up -d"
       }
     },
     "documentManager": {

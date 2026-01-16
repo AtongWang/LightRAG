@@ -1617,12 +1617,14 @@ async def _merge_nodes_then_upsert(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
+    text_chunks_storage: BaseKVStorage | None = None,
 ):
     """Get existing nodes from knowledge graph use name,if exists, merge data, else create, then upsert."""
     already_entity_types = []
     already_source_ids = []
     already_description = []
     already_file_paths = []
+    already_multimodal_attrs = {}  # Store existing multimodal attributes
 
     # 1. Get existing node data from knowledge graph
     already_node = await knowledge_graph_inst.get_node(entity_name)
@@ -1631,6 +1633,10 @@ async def _merge_nodes_then_upsert(
         already_source_ids.extend(already_node["source_id"].split(GRAPH_FIELD_SEP))
         already_file_paths.extend(already_node["file_path"].split(GRAPH_FIELD_SEP))
         already_description.extend(already_node["description"].split(GRAPH_FIELD_SEP))
+        # Preserve existing multimodal attributes
+        for attr in ["asset_path", "asset_id", "modal_type", "table_html", "table_markdown", "equation_latex"]:
+            if already_node.get(attr):
+                already_multimodal_attrs[attr] = already_node[attr]
 
     new_source_ids = [dp["source_id"] for dp in nodes_data if dp.get("source_id")]
 
@@ -1848,7 +1854,52 @@ async def _merge_nodes_then_upsert(
     else:
         logger.debug(status_message)
 
-    # 11. Update both graph and vector db
+    # 11. Collect multimodal metadata from nodes_data
+    # Prioritize: existing attrs > new attrs (keep first found for each type)
+    multimodal_attrs = dict(already_multimodal_attrs)  # Start with existing attributes
+    for dp in nodes_data:
+        if "multimodal_meta" in dp and dp["multimodal_meta"]:
+            meta = dp["multimodal_meta"]
+            # Merge multimodal attributes (first occurrence wins for each type)
+            if meta.get("asset_path") and "asset_path" not in multimodal_attrs:
+                multimodal_attrs["asset_path"] = meta["asset_path"]
+            if meta.get("asset_id") and "asset_id" not in multimodal_attrs:
+                multimodal_attrs["asset_id"] = meta["asset_id"]
+            if meta.get("modal_type") and "modal_type" not in multimodal_attrs:
+                multimodal_attrs["modal_type"] = meta["modal_type"]
+            if meta.get("table_html") and "table_html" not in multimodal_attrs:
+                multimodal_attrs["table_html"] = meta["table_html"]
+            if meta.get("table_markdown") and "table_markdown" not in multimodal_attrs:
+                multimodal_attrs["table_markdown"] = meta["table_markdown"]
+            if meta.get("equation_latex") and "equation_latex" not in multimodal_attrs:
+                multimodal_attrs["equation_latex"] = meta["equation_latex"]
+
+    # 11.1 Fallback: gather multimodal metadata from chunk storage if still missing
+    if text_chunks_storage is not None and full_source_ids:
+        try:
+            chunk_data_list = await text_chunks_storage.get_by_ids(full_source_ids)
+            for chunk_data in chunk_data_list:
+                if not isinstance(chunk_data, dict):
+                    continue
+                if not chunk_data.get("is_multimodal"):
+                    continue
+                # Only fill missing keys (keep first occurrence)
+                if chunk_data.get("asset_path") and "asset_path" not in multimodal_attrs:
+                    multimodal_attrs["asset_path"] = chunk_data.get("asset_path")
+                if chunk_data.get("asset_id") and "asset_id" not in multimodal_attrs:
+                    multimodal_attrs["asset_id"] = chunk_data.get("asset_id")
+                if chunk_data.get("modal_type") and "modal_type" not in multimodal_attrs:
+                    multimodal_attrs["modal_type"] = chunk_data.get("modal_type")
+                if chunk_data.get("table_html") and "table_html" not in multimodal_attrs:
+                    multimodal_attrs["table_html"] = chunk_data.get("table_html")
+                if chunk_data.get("table_markdown") and "table_markdown" not in multimodal_attrs:
+                    multimodal_attrs["table_markdown"] = chunk_data.get("table_markdown")
+                if chunk_data.get("equation_latex") and "equation_latex" not in multimodal_attrs:
+                    multimodal_attrs["equation_latex"] = chunk_data.get("equation_latex")
+        except Exception as e:
+            logger.debug(f"Failed to load multimodal metadata for `{entity_name}` from chunks: {e}")
+
+    # 12. Update both graph and vector db
     node_data = dict(
         entity_id=entity_name,
         entity_type=entity_type,
@@ -1857,6 +1908,7 @@ async def _merge_nodes_then_upsert(
         file_path=file_path,
         created_at=int(time.time()),
         truncate=truncation_info,
+        **multimodal_attrs,  # Include multimodal attributes if present
     )
     await knowledge_graph_inst.upsert_node(
         entity_name,
@@ -1873,6 +1925,7 @@ async def _merge_nodes_then_upsert(
                 "content": entity_content,
                 "source_id": source_id,
                 "file_path": file_path,
+                **multimodal_attrs,  # Include multimodal attributes in VDB
             }
         }
         await safe_vdb_operation_with_exception(
@@ -2453,6 +2506,7 @@ async def merge_nodes_and_edges(
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     relation_chunks_storage: BaseKVStorage | None = None,
+    text_chunks_storage: BaseKVStorage | None = None,
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = "unknown_source",
@@ -2478,6 +2532,7 @@ async def merge_nodes_and_edges(
         llm_response_cache: LLM response cache
         entity_chunks_storage: Storage tracking full chunk lists per entity
         relation_chunks_storage: Storage tracking full chunk lists per relation
+        text_chunks_storage: Storage for chunk metadata (used for multimodal propagation)
         current_file_number: Current file number for logging
         total_files: Total files for logging
         file_path: File path for logging
@@ -2550,6 +2605,7 @@ async def merge_nodes_and_edges(
                         pipeline_status_lock,
                         llm_response_cache,
                         entity_chunks_storage,
+                        text_chunks_storage,
                     )
 
                     return entity_data
@@ -3043,6 +3099,25 @@ async def extract_entities(
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
+
+        # Attach multimodal metadata to entities if chunk has multimodal content
+        if chunk_dp.get("is_multimodal"):
+            multimodal_meta = {
+                "modal_type": chunk_dp.get("modal_type"),
+                "asset_id": chunk_dp.get("asset_id"),
+                "asset_path": chunk_dp.get("asset_path"),
+                "table_html": chunk_dp.get("table_html"),
+                "table_markdown": chunk_dp.get("table_markdown"),
+                "equation_latex": chunk_dp.get("equation_latex"),
+            }
+            # Remove None values
+            multimodal_meta = {k: v for k, v in multimodal_meta.items() if v is not None}
+            
+            # Attach to each entity extracted from this chunk
+            if multimodal_meta:
+                for entity_name in maybe_nodes:
+                    for entity_data in maybe_nodes[entity_name]:
+                        entity_data["multimodal_meta"] = multimodal_meta
 
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges

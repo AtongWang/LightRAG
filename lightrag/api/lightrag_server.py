@@ -51,6 +51,7 @@ from lightrag.api.routers.document_routes import (
 )
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.graph_routes import create_graph_routes
+from lightrag.api.routers.multimodal_routes import create_multimodal_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.ontology_routes import create_ontology_router
 from lightrag.api.routers.project_routes import create_project_router
@@ -649,6 +650,112 @@ def create_app(args):
                 raise Exception(f"Failed to import {binding} options: {e}")
         return {}
 
+    def create_vision_model_func(args, llm_timeout: int):
+        """
+        Create vision model function that supports image_data parameter.
+        Uses OpenAI vision API format for image understanding.
+        
+        The vision function accepts:
+        - prompt: Text prompt for the vision model
+        - system_prompt: Optional system prompt
+        - history_messages: Optional conversation history
+        - image_data: Base64 encoded image data (data:mime_type;base64,xxx format)
+        - **kwargs: Additional parameters
+        
+        Returns:
+        - A function that can process vision requests, or None if not configured
+        """
+        # Determine vision model configuration - fall back to LLM settings if not specified
+        vision_model = args.vision_model or args.llm_model
+        vision_binding = args.vision_binding or args.llm_binding  # noqa: F841 - Reserved for future multi-binding support
+        vision_host = args.vision_binding_host or args.llm_binding_host
+        vision_api_key = args.vision_binding_api_key or args.llm_binding_api_key
+        
+        # Check if vision is properly configured (need a vision-capable model)
+        # Common vision models: gpt-4o, gpt-4-vision-preview, claude-3-*, gemini-pro-vision
+        vision_capable_patterns = ['gpt-4o', 'gpt-4-vision', 'claude-3', 'gemini', 'llava', 'qwen-vl']
+        is_vision_capable = any(pattern in vision_model.lower() for pattern in vision_capable_patterns) if vision_model else False
+        
+        if not is_vision_capable:
+            logger.warning(
+                f"Vision model '{vision_model}' may not support vision capabilities. "
+                f"Set VISION_MODEL to a vision-capable model like gpt-4o, claude-3-sonnet, etc."
+            )
+
+        async def vision_model_complete(
+            prompt: str,
+            system_prompt: str = None,
+            history_messages: list = None,
+            image_data: str = None,
+            **kwargs,
+        ) -> str:
+            """
+            Complete a vision request with image data.
+            
+            Args:
+                prompt: Text prompt
+                system_prompt: Optional system prompt
+                history_messages: Optional conversation history
+                image_data: Image data in format 'data:mime_type;base64,xxx' or just base64 string
+                **kwargs: Additional parameters
+            """
+            from lightrag.llm.openai import openai_complete_if_cache
+            
+            if history_messages is None:
+                history_messages = []
+            
+            # If no image data, fall back to regular text completion
+            if not image_data:
+                return await openai_complete_if_cache(
+                    vision_model,
+                    prompt,
+                    system_prompt=system_prompt,
+                    history_messages=history_messages,
+                    base_url=vision_host,
+                    api_key=vision_api_key,
+                    timeout=llm_timeout,
+                    **kwargs,
+                )
+            
+            # Parse image data - handle both 'data:mime;base64,xxx' and raw base64
+            if image_data.startswith('data:'):
+                # Already in data URI format
+                image_url = image_data
+            else:
+                # Assume raw base64, default to jpeg
+                image_url = f"data:image/jpeg;base64,{image_data}"
+            
+            # Build messages with vision content
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(history_messages)
+            
+            # Create user message with image
+            user_content = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                }
+            ]
+            messages.append({"role": "user", "content": user_content})
+            
+            # Call OpenAI vision API
+            return await openai_complete_if_cache(
+                vision_model,
+                "",  # Empty prompt since we're using messages
+                system_prompt=None,
+                history_messages=[],
+                messages=messages,
+                base_url=vision_host,
+                api_key=vision_api_key,
+                timeout=llm_timeout,
+                **kwargs,
+            )
+        
+        return vision_model_complete
+
     def create_optimized_embedding_function(
         config_cache: LLMConfigCache, binding, model, host, api_key, args
     ) -> EmbeddingFunc:
@@ -1053,10 +1160,14 @@ def create_app(args):
 
     # Initialize RAG with unified configuration
     try:
+        # Create vision model function for multimodal processing
+        vision_func = create_vision_model_func(args, llm_timeout)
+        
         rag = LightRAG(
             working_dir=args.working_dir,
             workspace=args.workspace,
             llm_model_func=create_llm_model_func(args.llm_binding),
+            vision_model_func=vision_func,
             llm_model_name=args.llm_model,
             llm_model_max_async=args.max_async,
             summary_max_tokens=args.summary_max_tokens,
@@ -1101,6 +1212,7 @@ def create_app(args):
     )
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
+    app.include_router(create_multimodal_routes(rag, api_key))
 
     # Add Ontology, Project, Enrichment, and Entity routes
     app.include_router(create_ontology_router(rag, api_key))

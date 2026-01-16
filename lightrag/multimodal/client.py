@@ -111,10 +111,10 @@ class RAGAnythingClient:
                 if is_healthy:
                     logger.debug(f"RAGAnything service is healthy at {self.base_url}")
                 else:
-                    logger.warning(f"RAGAnything service returned status {response.status}")
+                    logger.debug(f"RAGAnything service returned status {response.status}")
                 return is_healthy
         except Exception as e:
-            logger.warning(f"RAGAnything health check failed: {e}")
+            logger.debug(f"RAGAnything health check failed: {e}")
             return False
 
     async def __aenter__(self):

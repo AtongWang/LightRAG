@@ -13,6 +13,8 @@ import {
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter } from 'lucide-react'
 import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
+import { getMultimodalNodeType, isMultimodalNode, MultimodalType } from '@/types/multimodal'
+import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 
 /**
  * TableView - Table view for knowledge graph nodes
@@ -37,6 +39,17 @@ type RelationRow = RawEdgeType & {
 
 interface TableViewProps {
   viewMode?: 'entities' | 'relations'
+}
+
+type MultimodalPayload = {
+  modalType: MultimodalType | null
+  assetId?: string
+  assetPath?: string
+  tableHtml?: string
+  tableMarkdown?: string
+  equationLatex?: string
+  equationText?: string
+  imageCaption?: string
 }
 
 const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
@@ -123,6 +136,29 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
   const columnHelper = createColumnHelper<TableRow>()
   const relationColumnHelper = createColumnHelper<RelationRow>()
 
+  const getMultimodalPayload = (properties?: Record<string, any>): MultimodalPayload => {
+    if (!properties) {
+      return { modalType: null }
+    }
+    const meta = (properties.multimodal_meta && typeof properties.multimodal_meta === 'object')
+      ? (properties.multimodal_meta as Record<string, any>)
+      : null
+    const modalType = getMultimodalNodeType({ properties }) || null
+    return {
+      modalType,
+      assetId: (properties.asset_id as string) || (meta?.asset_id as string),
+      assetPath: (properties.img_path as string) || (properties.asset_path as string)
+        || (meta?.img_path as string) || (meta?.asset_path as string),
+      tableHtml: (properties.table_html as string) || (meta?.table_html as string),
+      tableMarkdown: (properties.table_body as string) || (properties.table_data as string) || (properties.table_markdown as string)
+        || (meta?.table_body as string) || (meta?.table_data as string) || (meta?.table_markdown as string),
+      equationLatex: (properties.equation_latex as string) || (meta?.equation_latex as string),
+      equationText: (properties.equation_text as string) || (properties.text as string)
+        || (meta?.equation_text as string),
+      imageCaption: (properties.image_caption as string) || (meta?.image_caption as string),
+    }
+  }
+
   const nodeColumns = useMemo(() => [
     columnHelper.accessor('id', {
       id: 'id',
@@ -163,24 +199,65 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
     }),
     columnHelper.accessor(row => row.properties?.image_url || row.properties?.avatar || row.properties?.img, {
       id: 'image',
-      header: t('graphPanel.table.image', 'Image'),
+      header: t('graphPanel.table.multimodal', 'Multimodal'),
       cell: info => {
-        const url = info.getValue()
-        if (!url) return '-'
+        const properties = info.row.original.properties || {}
+        const payload = getMultimodalPayload(properties)
+        const fallbackImageUrl = info.getValue()
+        const isMultimodal = isMultimodalNode({ properties })
+
+        if (!isMultimodal && !fallbackImageUrl) return '-'
+
+        const nodeId = info.row.original.id
+
+        if (payload.modalType === 'table' && (payload.tableMarkdown || payload.tableHtml)) {
+          return (
+            <div className="flex justify-center" key={`table-${nodeId}`}>
+              <div className="max-w-[240px]">
+                <MultimodalTable
+                  markdownData={payload.tableMarkdown}
+                  htmlData={payload.tableHtml}
+                  maxHeight={120}
+                  expandable={false}
+                />
+              </div>
+            </div>
+          )
+        }
+
+        if (payload.modalType === 'equation' && (payload.equationLatex || payload.equationText)) {
+          return (
+            <div className="flex justify-center" key={`equation-${nodeId}`}>
+              <div className="max-w-[240px]">
+                <MultimodalEquation
+                  latex={payload.equationLatex}
+                  text={payload.equationText}
+                  className="max-h-28 overflow-hidden"
+                />
+              </div>
+            </div>
+          )
+        }
+
+        const imageSrc = payload.assetId ? undefined : (payload.assetPath || fallbackImageUrl)
+        if (!imageSrc && !payload.assetId) return '-'
+
         return (
-          <div className="flex justify-center">
-            <img
-              src={url}
+          <div className="flex justify-center" key={`image-${nodeId}`}>
+            <MultimodalImage
+              assetId={payload.assetId}
+              src={imageSrc}
               alt="Node thumbnail"
-              className="w-12 h-12 rounded-full object-cover border border-gray-300 dark:border-gray-600"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none'
-              }}
+              caption={payload.imageCaption}
+              thumbnail
+              maxHeight={64}
+              className="w-16 h-16"
+              imageClassName="object-cover"
             />
           </div>
         )
       },
-      size: 80,
+      size: 200,
       enableSorting: false
     })
   ], [t])

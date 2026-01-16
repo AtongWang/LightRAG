@@ -4,7 +4,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, X, User, Bot, Sparkles, Settings2 } from 'lucide-react'
+import { Send, X, User, Bot, Sparkles, Settings2, ImageIcon } from 'lucide-react'
 import { useProjectStore, useSettingsStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { queryTextStream, Message as ApiMessage, QueryMode } from '@/api/lightrag'
@@ -17,11 +17,31 @@ import {
 } from '@/components/ui/Popover'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
+import 'katex/dist/katex.min.css'
 
 interface ReferenceItem {
   reference_id: string
   file_path: string
   content?: string[]
+}
+
+/** 多模态内容引用 */
+interface MultimodalReference {
+  type: 'image' | 'table' | 'equation' | 'audio' | 'video' | 'generic'
+  asset_id?: string
+  asset_url?: string
+  description?: string
+  source_file?: string
+  // 图片数据
+  image_data?: string
+  // 表格数据
+  table_data?: string
+  table_html?: string
+  // 公式数据
+  equation_latex?: string
 }
 
 interface ChatMessage {
@@ -30,6 +50,7 @@ interface ChatMessage {
   content: string
   timestamp: Date
   references?: ReferenceItem[]
+  multimodal?: MultimodalReference[]
   isWelcome?: boolean
 }
 
@@ -235,7 +256,10 @@ export function ChatInterface() {
                       </div>
                     ) : message.role === 'assistant' ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:text-[hsl(var(--vermillion))] prose-code:bg-[hsl(var(--muted))] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[rehypeKatex]}
+                        >
                           {message.content}
                         </ReactMarkdown>
                       </div>
@@ -244,6 +268,74 @@ export function ChatInterface() {
                         {message.content}
                       </div>
                     )
+                  )}
+
+                  {/* 多模态内容展示 */}
+                  {message.multimodal && message.multimodal.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                        <ImageIcon className="w-3 h-3 text-[hsl(var(--jade))]" />
+                        <span>相关多模态内容：</span>
+                      </div>
+                      <div className="space-y-3">
+                        {message.multimodal.map((item, index) => (
+                          <div 
+                            key={`mm-${index}`} 
+                            className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800/50"
+                          >
+                            {/* 多模态内容标题 */}
+                            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                              <span className="text-base">
+                                {item.type === 'image' ? '🖼️' : item.type === 'table' ? '📊' : item.type === 'equation' ? '📐' : '📎'}
+                              </span>
+                              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                {item.type === 'image' ? '图片' : item.type === 'table' ? '表格' : item.type === 'equation' ? '公式' : '附件'}
+                              </span>
+                              {item.source_file && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto truncate max-w-[150px]">
+                                  {item.source_file}
+                                </span>
+                              )}
+                            </div>
+                            
+                            {/* 多模态内容渲染 */}
+                            <div className="p-3">
+                              {item.type === 'image' && (
+                                <MultimodalImage
+                                  assetId={item.asset_id}
+                                  src={item.asset_url}
+                                  base64Data={item.image_data}
+                                  alt={item.description}
+                                  maxHeight={200}
+                                />
+                              )}
+                              
+                              {item.type === 'table' && (
+                                <MultimodalTable
+                                  htmlData={item.table_html}
+                                  markdownData={item.table_data}
+                                  maxHeight={200}
+                                  expandable
+                                />
+                              )}
+                              
+                              {item.type === 'equation' && item.equation_latex && (
+                                <MultimodalEquation
+                                  latex={item.equation_latex}
+                                />
+                              )}
+                              
+                              {/* 描述 */}
+                              {item.description && (
+                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
 
                   {/* 知识来源 */}

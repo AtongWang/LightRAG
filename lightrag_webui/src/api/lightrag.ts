@@ -797,15 +797,34 @@ export const insertTexts = async (texts: string[]): Promise<DocActionResponse> =
 export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percentCompleted: number) => void,
-  projectId?: string
+  projectId?: string,
+  useMultimodal: boolean = false
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+
+  // Choose API endpoint based on multimodal mode
+  let endpoint = useMultimodal
+    ? '/multimodal/documents/upload'
+    : '/documents/upload'
+
+  // Build query parameters
+  const params = new URLSearchParams()
   if (projectId) {
-    formData.append('project_id', projectId)
+    params.append('project_id', projectId)
   }
 
-  const response = await axiosInstance.post('/documents/upload', formData, {
+  // Add multimodal processing flag if using multimodal endpoint
+  if (useMultimodal) {
+    params.append('enable_multimodal_processing', 'true')
+  }
+
+  // Append query parameters to endpoint if any
+  if (params.toString()) {
+    endpoint = `${endpoint}?${params.toString()}`
+  }
+
+  const response = await axiosInstance.post(endpoint, formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
     },
@@ -818,6 +837,23 @@ export const uploadDocument = async (
         }
         : undefined
   })
+  return response.data
+}
+
+// Check multimodal parser availability
+export interface ParserStatus {
+  status: string
+  parsers: {
+    mineru_api: boolean
+    mineru_local: boolean
+    raganything: boolean
+    recommended: string | null
+  }
+  multimodal_enabled: boolean
+}
+
+export const getMultimodalParserStatus = async (): Promise<ParserStatus> => {
+  const response = await axiosInstance.get('/multimodal/parsers/status')
   return response.data
 }
 

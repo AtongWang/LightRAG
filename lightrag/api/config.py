@@ -373,6 +373,13 @@ def parse_args() -> argparse.Namespace:
     args.embedding_dim = get_env_value("EMBEDDING_DIM", None, int, special_none=True)
     args.embedding_send_dim = get_env_value("EMBEDDING_SEND_DIM", False, bool)
 
+    # Vision model configuration for multimodal document processing
+    # If not set, defaults to llm_model (may not support vision)
+    args.vision_model = get_env_value("VISION_MODEL", None, special_none=True)
+    args.vision_binding = get_env_value("VISION_BINDING", None, special_none=True)
+    args.vision_binding_host = get_env_value("VISION_BINDING_HOST", None, special_none=True)
+    args.vision_binding_api_key = get_env_value("VISION_BINDING_API_KEY", None, special_none=True)
+
     # Inject chunk configuration
     args.chunk_size = get_env_value("CHUNK_SIZE", 1200, int)
     args.chunk_overlap_size = get_env_value("CHUNK_OVERLAP_SIZE", 100, int)

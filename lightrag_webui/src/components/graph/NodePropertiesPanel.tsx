@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { X, Plus, Sparkles, Image as ImageIcon } from 'lucide-react'
+import { X, Plus, Sparkles } from 'lucide-react'
 import { useGraphStore, RawNodeType } from '@/stores/graph'
 import { useEnrichmentStore } from '@/stores'
 import { checkEntityNameExists } from '@/api/lightrag'
@@ -9,6 +9,8 @@ import Text from '@/components/ui/Text'
 import Button from '@/components/ui/Button'
 import EditablePropertyRow from './EditablePropertyRow'
 import PropertyEditDialog from './PropertyEditDialog'
+import { isMultimodalNode, getMultimodalNodeType, MULTIMODAL_COLORS, MULTIMODAL_ICONS } from '@/types/multimodal'
+import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 
 interface NodePropertiesPanelProps {
   /**
@@ -52,13 +54,32 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
   const [newPropertyValue, setNewPropertyValue] = useState('')
   const graphDataVersion = useGraphStore.use.graphDataVersion()
 
+  const isMultimodal = isMultimodalNode({ properties: node.properties })
+  const modalType = getMultimodalNodeType({ properties: node.properties })
+  const multimodalMeta = (node.properties.multimodal_meta && typeof node.properties.multimodal_meta === 'object')
+    ? (node.properties.multimodal_meta as Record<string, any>)
+    : null
+  const assetId = (node.properties.asset_id as string) || (multimodalMeta?.asset_id as string)
+  const assetPath = (node.properties.img_path as string) || (node.properties.asset_path as string)
+    || (multimodalMeta?.img_path as string) || (multimodalMeta?.asset_path as string)
+  const tableMarkdown = (node.properties.table_body as string) || (node.properties.table_data as string) || (node.properties.table_markdown as string)
+    || (multimodalMeta?.table_body as string) || (multimodalMeta?.table_data as string) || (multimodalMeta?.table_markdown as string)
+  const tableHtml = (node.properties.table_html as string) || (multimodalMeta?.table_html as string)
+  const equationLatex = (node.properties.equation_latex as string) || (multimodalMeta?.equation_latex as string)
+  const equationText = (node.properties.equation_text as string) || (node.properties.text as string)
+    || (multimodalMeta?.equation_text as string)
+
   // Extract image URLs from properties
   const imageUrl = node.properties.image_url || node.properties.avatar || node.properties.img
-  const hasImage = Boolean(imageUrl)
+  const hasImage = Boolean(imageUrl) && !isMultimodal
 
   // Filter out system properties
   const displayProperties = Object.entries(node.properties)
     .filter(([key]) => !['created_at', 'truncate', 'image_url', 'avatar', 'img'].includes(key))
+    .filter(([key]) => {
+      if (!isMultimodal) return true
+      return !['asset_id', 'img_path', 'asset_path', 'table_body', 'table_data', 'table_markdown', 'table_html', 'equation_latex', 'equation_text', 'multimodal_meta'].includes(key)
+    })
     .sort(([a], [b]) => a.localeCompare(b))
 
   const handleAddProperty = async () => {
@@ -179,7 +200,50 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
         </div>
       </div>
 
-      {/* Image Display */}
+      {/* Multimodal Preview */}
+      {isMultimodal && modalType && (
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">{MULTIMODAL_ICONS[modalType]}</span>
+            <span
+              className="text-xs px-2 py-0.5 rounded-full text-white"
+              style={{ backgroundColor: MULTIMODAL_COLORS[modalType] }}
+            >
+              {modalType === 'image' ? '图片' :
+               modalType === 'table' ? '表格' :
+               modalType === 'equation' ? '公式' : modalType}
+            </span>
+          </div>
+          {modalType === 'image' && (assetId || assetPath) && (
+            <MultimodalImage
+              assetId={assetId}
+              src={assetId ? undefined : assetPath}
+              alt={node.labels[0] || node.id}
+              caption={(node.properties.image_caption as string) || (multimodalMeta?.image_caption as string)}
+              thumbnail
+              maxHeight={180}
+            />
+          )}
+          {modalType === 'table' && (tableMarkdown || tableHtml) && (
+            <MultimodalTable
+              markdownData={tableMarkdown}
+              htmlData={tableHtml}
+              caption={(node.properties.table_caption as string) || (multimodalMeta?.table_caption as string)}
+              maxHeight={180}
+              expandable={false}
+            />
+          )}
+          {modalType === 'equation' && (equationLatex || equationText) && (
+            <MultimodalEquation
+              latex={equationLatex}
+              text={equationText}
+              caption={(node.properties.equation_caption as string) || (multimodalMeta?.equation_caption as string)}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Image Display (legacy) */}
       {hasImage && (
         <div className="mb-4">
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">

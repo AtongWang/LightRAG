@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { FileRejection } from 'react-dropzone'
 import Button from '@/components/ui/Button'
 import {
@@ -12,9 +12,12 @@ import {
 import FileUploader from '@/components/ui/FileUploader'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils'
-import { uploadDocument } from '@/api/lightrag'
+import { uploadDocument, getMultimodalParserStatus, ParserStatus } from '@/api/lightrag'
+import { Switch } from '@/components/ui/Switch'
+import { Label } from '@/components/ui/Label'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 
-import { UploadIcon } from 'lucide-react'
+import { UploadIcon, Info, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 interface UploadDocumentsDialogProps {
@@ -27,6 +30,40 @@ export default function UploadDocumentsDialog({ onDocumentsUploaded }: UploadDoc
   const [isUploading, setIsUploading] = useState(false)
   const [progresses, setProgresses] = useState<Record<string, number>>({})
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({})
+
+  // Multimodal parsing state
+  const [useMultimodal, setUseMultimodal] = useState(false)
+  const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null)
+  const [checkingParser, setCheckingParser] = useState(false)
+
+  // Check parser availability when dialog opens
+  useEffect(() => {
+    if (open && !parserStatus && !checkingParser) {
+      setCheckingParser(true)
+      getMultimodalParserStatus()
+        .then((status) => {
+          setParserStatus(status)
+          // Auto-enable if multimodal is available
+          if (status.multimodal_enabled && status.parsers.recommended) {
+            // Don't auto-enable, let user choose
+          }
+        })
+        .catch((err) => {
+          console.debug('Multimodal parser not available:', err)
+          setParserStatus({
+            status: 'unavailable',
+            parsers: {
+              mineru_api: false,
+              mineru_local: false,
+              raganything: false,
+              recommended: null
+            },
+            multimodal_enabled: false
+          })
+        })
+        .finally(() => setCheckingParser(false))
+    }
+  }, [open, parserStatus, checkingParser])
 
   const handleRejectedFiles = useCallback(
     (rejectedFiles: FileRejection[]) => {
@@ -101,7 +138,7 @@ export default function UploadDocumentsDialog({ onDocumentsUploaded }: UploadDoc
                 ...pre,
                 [file.name]: percentCompleted
               }))
-            })
+            }, undefined, useMultimodal)
 
             if (result.status === 'duplicated') {
               uploadErrors[file.name] = t('documentPanel.uploadDocuments.fileUploader.duplicateFile')
@@ -175,7 +212,7 @@ export default function UploadDocumentsDialog({ onDocumentsUploaded }: UploadDoc
         setIsUploading(false)
       }
     },
-    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded]
+    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded, useMultimodal]
   )
 
   return (
@@ -204,6 +241,60 @@ export default function UploadDocumentsDialog({ onDocumentsUploaded }: UploadDoc
             {t('documentPanel.uploadDocuments.description')}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Multimodal Parsing Toggle */}
+        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <div className="flex flex-col gap-0.5">
+              <Label htmlFor="multimodal-toggle" className="text-sm font-medium cursor-pointer">
+                {t('documentPanel.uploadDocuments.multimodal.label', 'Enhanced Multimodal Parsing')}
+              </Label>
+              <span className="text-xs text-muted-foreground">
+                {t('documentPanel.uploadDocuments.multimodal.description', 'Extract images, tables and equations with AI descriptions')}
+              </span>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-4 w-4 text-muted-foreground cursor-help ml-1" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>{t('documentPanel.uploadDocuments.multimodal.tooltip', 'Uses MinerU parser for structured document parsing. Requires MinerU Docker service to be running.')}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="flex items-center gap-2">
+            {checkingParser && (
+              <span className="text-xs text-muted-foreground animate-pulse">
+                {t('documentPanel.uploadDocuments.multimodal.checking', 'Checking...')}
+              </span>
+            )}
+            {parserStatus && !parserStatus.multimodal_enabled && !parserStatus.parsers.recommended && !checkingParser && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-destructive cursor-help">
+                    {t('documentPanel.uploadDocuments.multimodal.unavailable', 'Unavailable')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{t('documentPanel.uploadDocuments.multimodal.unavailableHint', 'Start MinerU Docker service: docker compose --profile api up -d')}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {parserStatus && parserStatus.parsers.recommended && !checkingParser && (
+              <span className="text-xs text-green-600 dark:text-green-400">
+                ✓ {parserStatus.parsers.recommended}
+              </span>
+            )}
+            <Switch
+              id="multimodal-toggle"
+              checked={useMultimodal}
+              onCheckedChange={setUseMultimodal}
+              disabled={isUploading || (parserStatus !== null && !parserStatus.multimodal_enabled && !parserStatus.parsers.recommended)}
+            />
+          </div>
+        </div>
+
         <FileUploader
           maxFileCount={Infinity}
           maxSize={200 * 1024 * 1024}

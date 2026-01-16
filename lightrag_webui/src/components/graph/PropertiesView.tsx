@@ -6,6 +6,8 @@ import useLightragGraph from '@/hooks/useLightragGraph'
 import { useTranslation } from 'react-i18next'
 import { GitBranchPlus, Scissors } from 'lucide-react'
 import EditablePropertyRow from './EditablePropertyRow'
+import { isMultimodalNode, getMultimodalNodeType, MULTIMODAL_ICONS, MULTIMODAL_COLORS } from '@/types/multimodal'
+import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 
 /**
  * Component that view properties of elements in graph.
@@ -266,6 +268,10 @@ const PropertyRow = ({
 
 const NodePropertiesView = ({ node }: { node: NodeType }) => {
   const { t } = useTranslation()
+  
+  // 检查是否为多模态节点
+  const isMultimodal = isMultimodalNode({ properties: node.properties })
+  const modalType = getMultimodalNodeType({ properties: node.properties })
 
   const handleExpandNode = () => {
     useGraphStore.getState().triggerNodeExpand(node.id)
@@ -275,10 +281,87 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
     useGraphStore.getState().triggerNodePrune(node.id)
   }
 
+  // 渲染多模态内容预览
+  const renderMultimodalPreview = () => {
+    if (!isMultimodal || !modalType) return null
+    
+    const props = node.properties
+    const multimodalMeta = (props.multimodal_meta && typeof props.multimodal_meta === 'object')
+      ? (props.multimodal_meta as Record<string, any>)
+      : null
+    const assetId = (props.asset_id as string) || (multimodalMeta?.asset_id as string)
+    const assetPath = (props.img_path as string) || (props.asset_path as string)
+      || (multimodalMeta?.img_path as string) || (multimodalMeta?.asset_path as string)
+    const tableMarkdown = (props.table_body as string) || (props.table_data as string) || (props.table_markdown as string)
+      || (multimodalMeta?.table_body as string) || (multimodalMeta?.table_data as string) || (multimodalMeta?.table_markdown as string)
+    const tableHtml = (props.table_html as string) || (multimodalMeta?.table_html as string)
+    const equationLatex = (props.equation_latex as string) || (multimodalMeta?.equation_latex as string)
+    const equationText = (props.equation_text as string) || (props.text as string)
+      || (multimodalMeta?.equation_text as string)
+    
+    return (
+      <div className="mb-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">{MULTIMODAL_ICONS[modalType]}</span>
+          <span 
+            className="text-xs px-2 py-0.5 rounded-full text-white"
+            style={{ backgroundColor: MULTIMODAL_COLORS[modalType] }}
+          >
+            {modalType === 'image' ? '图片' : 
+             modalType === 'table' ? '表格' : 
+             modalType === 'equation' ? '公式' : modalType}
+          </span>
+        </div>
+        
+        {/* 图片预览 */}
+        {modalType === 'image' && (assetId || assetPath) && (
+          <MultimodalImage
+            key="image-preview"
+            assetId={assetId}
+            src={assetId ? undefined : assetPath}
+            alt={props.entity_name as string || node.labels[0]}
+            caption={(props.image_caption as string) || (multimodalMeta?.image_caption as string)}
+            thumbnail
+            className="mb-2"
+          />
+        )}
+
+        {/* 表格预览 */}
+        {modalType === 'table' && (tableMarkdown || tableHtml) && (
+          <MultimodalTable
+            key="table-preview"
+            markdownData={tableMarkdown}
+            htmlData={tableHtml}
+            caption={(props.table_caption as string) || (multimodalMeta?.table_caption as string)}
+            maxHeight={150}
+            expandable={false}
+            className="mb-2"
+          />
+        )}
+
+        {/* 公式预览 */}
+        {modalType === 'equation' && (equationLatex || equationText) && (
+          <MultimodalEquation
+            key="equation-preview"
+            latex={equationLatex}
+            text={equationText}
+            caption={(props.equation_caption as string) || (multimodalMeta?.equation_caption as string)}
+            className="mb-2"
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-between items-center">
-        <h3 className="text-md pl-1 font-bold tracking-wide text-blue-700">{t('graphPanel.propertiesView.node.title')}</h3>
+        <h3 className="text-md pl-1 font-bold tracking-wide text-blue-700">
+          {t('graphPanel.propertiesView.node.title')}
+          {isMultimodal && (
+            <span className="ml-2 text-lg">{MULTIMODAL_ICONS[modalType || 'generic']}</span>
+          )}
+        </h3>
         <div className="flex gap-3">
           <Button
             size="icon"
@@ -300,6 +383,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           </Button>
         </div>
       </div>
+      
+      {/* 多模态内容预览 */}
+      {renderMultimodalPreview()}
+      
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
         <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
@@ -317,6 +404,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           .sort()
           .map((name) => {
             if (name === 'created_at' || name === 'truncate') return null; // Hide created_at and truncate properties
+            // 隐藏已在预览中显示的多模态属性
+            if (isMultimodal && ['asset_id', 'img_path', 'asset_path', 'table_body', 'table_data', 'table_markdown', 'table_html', 'equation_latex', 'equation_text', 'multimodal_meta'].includes(name)) {
+              return null;
+            }
             return (
               <PropertyRow
                 key={name}

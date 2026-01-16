@@ -77,3 +77,8 @@ memory-bank
 
 # Claude Code
 CLAUDE.md
+
+
+#Image Files
+parsed_docs
+parser_output

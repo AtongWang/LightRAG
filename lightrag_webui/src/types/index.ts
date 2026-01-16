@@ -11,6 +11,9 @@ export * from './ontology'
 // 导出实体相关类型
 export * from './entity'
 
+// 导出多模态相关类型
+export * from './multimodal'
+
 // 导出现有的lightrag类型（从api/lightrag.ts）
 export type {
   LightragNodeType,

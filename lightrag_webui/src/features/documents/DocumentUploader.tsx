@@ -3,12 +3,15 @@
  * 支持多模态文档上传（文本、图片、PDF等）
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, X, Image as ImageIcon, AlertCircle, File } from 'lucide-react'
+import { Upload, FileText, X, Image as ImageIcon, AlertCircle, File, Sparkles, Info } from 'lucide-react'
 import { useProjectStore } from '@/stores'
 import { toast } from 'sonner'
-import { uploadDocument } from '@/api/lightrag'
+import { uploadDocument, getMultimodalParserStatus, ParserStatus } from '@/api/lightrag'
+import { Switch } from '@/components/ui/Switch'
+import { Label } from '@/components/ui/Label'
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/Tooltip'
 
 interface UploadFile {
   file: File
@@ -26,6 +29,39 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
   const { currentProject } = useProjectStore()
   const [files, setFiles] = useState<UploadFile[]>([])
 
+  // Multimodal parsing state
+  const [useMultimodal, setUseMultimodal] = useState(false)
+  const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null)
+  const [checkingParser, setCheckingParser] = useState(false)
+
+  // Check parser availability on mount
+  useEffect(() => {
+    if (!parserStatus && !checkingParser) {
+      setCheckingParser(true)
+      getMultimodalParserStatus()
+        .then((status) => {
+          setParserStatus(status)
+        })
+        .catch((err) => {
+          console.debug('Multimodal parser not available:', err)
+          setParserStatus({
+            status: 'unavailable',
+            parsers: {
+              mineru_api: false,
+              mineru_local: false,
+              raganything: false,
+              recommended: null
+            },
+            multimodal_enabled: false
+          })
+        })
+        .finally(() => setCheckingParser(false))
+    }
+  }, [parserStatus, checkingParser])
+
+  // Check if multimodal is available (either enabled in config or parser available)
+  const multimodalAvailable = parserStatus?.multimodal_enabled || parserStatus?.parsers.recommended
+
   const processUpload = useCallback(async (uploadItem: UploadFile) => {
     setFiles(prev => prev.map(f =>
       f.id === uploadItem.id ? { ...f, status: 'uploading' as const } : f
@@ -33,7 +69,7 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
 
     try {
       // 使用真实的API上传文件，传递当前项目ID
-      console.log('Uploading file with project_id:', currentProject?.project_id)
+      console.log('Uploading file with project_id:', currentProject?.project_id, 'multimodal:', useMultimodal)
       await uploadDocument(
         uploadItem.file,
         (progress) => {
@@ -41,7 +77,8 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
             f.id === uploadItem.id ? { ...f, progress } : f
           ))
         },
-        currentProject?.project_id
+        currentProject?.project_id,
+        useMultimodal
       )
 
       setFiles(prev => prev.map(f =>
@@ -56,7 +93,7 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
       ))
       toast.error(`${uploadItem.file.name} 上传失败: ${errorMsg}`)
     }
-  }, [currentProject?.project_id])
+  }, [currentProject?.project_id, useMultimodal])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (!currentProject) {
@@ -77,7 +114,7 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
     newFiles.forEach(uploadItem => {
       processUpload(uploadItem)
     })
-  }, [currentProject, processUpload])
+  }, [currentProject, processUpload, useMultimodal])
 
   const removeFile = (id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id))
@@ -115,6 +152,64 @@ export function DocumentUploader({ onUploadSuccess }: DocumentUploaderProps) {
 
   return (
     <div className="space-y-4">
+      {/* 多模态解析开关 */}
+      <TooltipProvider>
+        <div className="flex items-center justify-between p-4 rounded-lg bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 border border-purple-200 dark:border-purple-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50">
+              <Sparkles className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="multimodal-toggle-main" className="text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer">
+                  增强多模态解析
+                </Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-gray-400 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>使用 MinerU 进行结构化文档解析，自动提取图片、表格和公式，并生成AI描述。需要运行 MinerU Docker 服务。</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                提取图片、表格和公式，生成AI描述
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {checkingParser && (
+              <span className="text-xs text-gray-500 animate-pulse">检查中...</span>
+            )}
+            {parserStatus && !multimodalAvailable && !checkingParser && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-orange-600 dark:text-orange-400 cursor-help">
+                    服务未启动
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>运行: docker compose --profile api up -d</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {parserStatus && multimodalAvailable && !checkingParser && (
+              <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                ✓ {parserStatus.parsers.recommended || 'available'}
+              </span>
+            )}
+            <Switch
+              id="multimodal-toggle-main"
+              checked={useMultimodal}
+              onCheckedChange={setUseMultimodal}
+              disabled={!multimodalAvailable}
+              className="data-[state=unchecked]:bg-gray-300 dark:data-[state=unchecked]:bg-gray-600 ml-2"
+            />
+          </div>
+        </div>
+      </TooltipProvider>
+
       {/* 上传区域 */}
       <div
         {...getRootProps()}

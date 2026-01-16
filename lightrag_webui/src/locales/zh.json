@@ -111,6 +111,14 @@
         "removeFile": "移除文件",
         "uploadDescription": "您可以上传{{isMultiple ? '多个' : count}}个文件（每个文件最大{{maxSize}}）",
         "duplicateFile": "文件名与服务器上的缓存重复"
+      },
+      "multimodal": {
+        "label": "增强多模态解析",
+        "description": "提取图片、表格和公式，并生成AI描述",
+        "tooltip": "使用 MinerU 进行结构化文档解析，需要运行 MinerU Docker 服务。",
+        "checking": "检查中...",
+        "unavailable": "不可用",
+        "unavailableHint": "启动 MinerU Docker 服务：docker compose --profile api up -d"
       }
     },
     "documentManager": {
