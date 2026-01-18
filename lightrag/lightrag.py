@@ -7,6 +7,7 @@ import inspect
 import os
 import time
 import warnings
+from hashlib import md5
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
@@ -1429,16 +1430,35 @@ class LightRAG:
         from pathlib import Path
         doc_statuses: dict[str, dict[str, Any]] = {}
 
+        def _compute_file_md5(file_path: str) -> str:
+            hasher = md5()
+            with open(file_path, "rb") as file_handle:
+                for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+
         update_storage = False
         try:
             for file_path in file_paths:
-                doc_id = compute_mdhash_id(file_path, prefix="doc-")
                 file_name = Path(file_path).name
                 display_file_name = (
                     metadata.get("original_filename")
                     if metadata and metadata.get("original_filename")
                     else file_name
                 )
+                project_id = metadata.get("project_id") if metadata else ""
+                file_hash = _compute_file_md5(file_path)
+                doc_id_seed = f"{file_hash}:{project_id}:{display_file_name}"
+                doc_id = compute_mdhash_id(doc_id_seed, prefix="doc-")
+
+                existing_doc = await self.doc_status.get_by_id(doc_id)
+                if existing_doc:
+                    existing_status = existing_doc.get("status")
+                    if existing_status not in (DocStatus.FAILED, DocStatus.FAILED.value):
+                        logger.info(
+                            f"Document already exists (status={existing_status}), skipping: {display_file_name}"
+                        )
+                        continue
 
                 # Create PENDING status before processing
                 doc_statuses[doc_id] = {
@@ -1476,22 +1496,9 @@ class LightRAG:
                         file_path,
                         track_id,
                         metadata=metadata,
+                        doc_id=doc_id,
                     )
                     update_storage = True
-
-                    # Update status to PROCESSED
-                    doc_statuses[doc_id] = {
-                        "status": DocStatus.PROCESSED,
-                        "content_summary": get_content_summary(parse_result.content or ""),
-                        "content_length": len(parse_result.content or ""),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "file_path": display_file_name,
-                        "track_id": track_id,
-                        "metadata": metadata or {},
-                        "chunks_count": len(parse_result.content_blocks) if parse_result.content_blocks else 0,
-                        "error_msg": None,
-                    }
 
                 except Exception as e:
                     logger.error(f"Failed to process {file_path}: {e}")
@@ -1528,6 +1535,7 @@ class LightRAG:
         file_path: str,
         track_id: str,
         metadata: dict[str, Any] | None = None,
+        doc_id: str | None = None,
     ) -> None:
         """Process a multimodal parse result and insert into storage.
 
@@ -1547,7 +1555,7 @@ class LightRAG:
         display_file_name = file_name
 
         # Create document entry
-        doc_key = compute_mdhash_id(parse_result.content, prefix="doc-")
+        doc_key = doc_id or compute_mdhash_id(parse_result.content, prefix="doc-")
         new_docs = {
             doc_key: {
                 "content": parse_result.content,
@@ -1560,6 +1568,11 @@ class LightRAG:
         _add_doc_keys = await self.full_docs.filter_keys({doc_key})
         if doc_key not in _add_doc_keys:
             logger.info(f"Document {file_name} already exists in storage, skipping")
+            existing_doc_status = await self.doc_status.get_by_id(doc_key)
+            if existing_doc_status:
+                existing_doc_status["status"] = DocStatus.PROCESSED
+                existing_doc_status["updated_at"] = datetime.now(timezone.utc).isoformat()
+                await self.doc_status.upsert({doc_key: existing_doc_status})
             return
 
         logger.info(f"Processing multimodal document: {file_name}")

@@ -113,14 +113,70 @@ function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
   }
 
   const isMultimodalHeader = (value: string) =>
-    /^\s*#{0,6}\s*(Multimodal|多模态)\b\s*[:：]?/i.test(value) ||
-    /^\s*(Multimodal|多模态)\b\s*[:：]?/i.test(value)
+    /^\s*#{0,6}\s*(Multimodal|多模态)(内容)?\s*[:：]?/i.test(value) ||
+    /^\s*(Multimodal|多模态)(内容)?\s*[:：]?/i.test(value)
 
   const isSectionHeader = (value: string) =>
     /^\s*#{1,6}\s+/.test(value) || /^\s*(参考文献|References)\b/i.test(value)
 
+  const parseMultimodalJson = (jsonText: string): MultimodalReference[] | null => {
+    try {
+      const parsed = JSON.parse(jsonText.trim())
+      if (parsed && Array.isArray(parsed.items)) {
+        return parsed.items.map((item: any) => ({
+          type: item.type || 'generic',
+          asset_id: item.asset_id,
+          asset_url: item.asset_url,
+          description: item.description,
+          source_file: item.source_file,
+          image_data: item.image_data,
+          table_data: item.table_markdown || item.table_data,
+          table_html: item.table_html,
+          equation_latex: item.equation_latex
+        }))
+      }
+    } catch {
+      return null
+    }
+    return null
+  }
+
   while (i < lines.length) {
     const line = lines[i]
+    const trimmedLine = line.trim()
+    if (trimmedLine.startsWith('```') && trimmedLine.toLowerCase().includes('json')) {
+      const rawLines: string[] = [line]
+      let jsonText = ''
+      i += 1
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        jsonText += `${lines[i]}\n`
+        rawLines.push(lines[i])
+        i += 1
+      }
+      if (i < lines.length && lines[i].trim().startsWith('```')) {
+        rawLines.push(lines[i])
+        i += 1
+      }
+      const fencedItems = parseMultimodalJson(jsonText)
+      if (fencedItems && fencedItems.length > 0) {
+        flushBuffer()
+        blocks.push({ type: 'multimodal', items: fencedItems })
+      } else {
+        buffer.push(...rawLines)
+      }
+      continue
+    }
+
+    if (trimmedLine.startsWith('{') && trimmedLine.includes('"items"')) {
+      const inlineItems = parseMultimodalJson(trimmedLine)
+      if (inlineItems && inlineItems.length > 0) {
+        flushBuffer()
+        blocks.push({ type: 'multimodal', items: inlineItems })
+        i += 1
+        continue
+      }
+    }
+
     if (!isMultimodalHeader(line)) {
       buffer.push(line)
       i += 1
@@ -135,6 +191,10 @@ function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
     }
 
     let jsonText = ''
+    const inlineJsonStart = line.indexOf('{')
+    if (inlineJsonStart >= 0) {
+      jsonText = line.slice(inlineJsonStart)
+    }
     if (i < lines.length && lines[i].trim().startsWith('```')) {
       rawLines.push(lines[i])
       i += 1
@@ -147,33 +207,20 @@ function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
         rawLines.push(lines[i])
         i += 1
       }
-    } else {
-      while (i < lines.length && lines[i].trim() !== '' && !isSectionHeader(lines[i])) {
+    } else if (!jsonText) {
+      while (
+        i < lines.length &&
+        lines[i].trim() !== '' &&
+        !isSectionHeader(lines[i]) &&
+        !isMultimodalHeader(lines[i])
+      ) {
         jsonText += `${lines[i]}\n`
         rawLines.push(lines[i])
         i += 1
       }
     }
 
-    let parsedItems: MultimodalReference[] | null = null
-    try {
-      const parsed = JSON.parse(jsonText.trim())
-      if (parsed && Array.isArray(parsed.items)) {
-        parsedItems = parsed.items.map((item: any) => ({
-          type: item.type || 'generic',
-          asset_id: item.asset_id,
-          asset_url: item.asset_url,
-          description: item.description,
-          source_file: item.source_file,
-          image_data: item.image_data,
-          table_data: item.table_markdown || item.table_data,
-          table_html: item.table_html,
-          equation_latex: item.equation_latex
-        }))
-      }
-    } catch {
-      parsedItems = null
-    }
+    const parsedItems = parseMultimodalJson(jsonText)
 
     if (parsedItems && parsedItems.length > 0) {
       flushBuffer()

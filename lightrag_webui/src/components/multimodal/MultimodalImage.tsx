@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, memo } from 'react'
 import { cn } from '@/lib/utils'
 import { Image as ImageIcon, Loader2, AlertCircle, ZoomIn, ExternalLink } from 'lucide-react'
 import { createAssetBlobUrl, getAssetUrl } from '@/api/multimodal'
+import axios from 'axios'
 
 interface MultimodalImageProps {
   /** 资源ID */
@@ -83,7 +84,22 @@ export function MultimodalImage({
           setImageSrc(blobUrl)
         } catch (e) {
           console.error('Failed to load image:', e)
-          setError('加载图片失败')
+          // 根据错误类型提供更具体的错误信息
+          if (axios.isAxiosError(e)) {
+            if (e.response?.status === 404) {
+              setError('图片不存在')
+            } else if (e.response?.status === 401 || e.response?.status === 403) {
+              setError('无权限访问图片')
+            } else if (e.response?.status) {
+              setError(`加载失败 (${e.response.status})`)
+            } else if (e.code === 'ERR_NETWORK' || e.message?.includes('Network Error')) {
+              setError('网络错误')
+            } else {
+              setError('加载图片失败')
+            }
+          } else {
+            setError('加载图片失败')
+          }
         } finally {
           setLoading(false)
         }
@@ -177,6 +193,13 @@ export function MultimodalImage({
               imageClassName
             )}
             style={{ maxHeight }}
+            onError={() => {
+              // 如果图片加载失败（例如blob URL无效），显示错误
+              if (!error) {
+                setError('图片加载失败')
+                setImageSrc(null)
+              }
+            }}
           />
           {zoomable && (
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
@@ -202,6 +225,13 @@ export function MultimodalImage({
               src={imageSrc}
               alt={alt}
               className="max-w-full max-h-[85vh] object-contain rounded-lg"
+              onError={() => {
+                // 如果放大视图中的图片加载失败，关闭放大视图
+                setIsZoomed(false)
+                if (!error) {
+                  setError('图片加载失败')
+                }
+              }}
             />
             {caption && (
               <p className="mt-4 text-white text-center">{caption}</p>

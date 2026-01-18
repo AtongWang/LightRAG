@@ -209,13 +209,21 @@ class StreamChunkResponse(BaseModel):
     )
 
 
-def _build_multimodal_results(
+async def _build_multimodal_results(
     chunks: List[Dict[str, Any]] | None,
     asset_storage: Any | None,
 ) -> List[Dict[str, Any]]:
     if not chunks:
         logger.debug(f"[_build_multimodal_results] No chunks provided")
         return []
+
+    # Initialize asset_storage if not already initialized
+    if asset_storage and hasattr(asset_storage, '_initialized') and not asset_storage._initialized:
+        try:
+            await asset_storage.initialize()
+        except Exception as e:
+            logger.warning(f"Failed to initialize asset_storage: {e}")
+            asset_storage = None
 
     logger.debug(f"[_build_multimodal_results] Processing {len(chunks)} chunks")
     results: List[Dict[str, Any]] = []
@@ -233,8 +241,9 @@ def _build_multimodal_results(
         thumbnail_url = None
         if asset_storage and asset_id:
             try:
-                asset_url = asset_storage.get_asset_url(asset_id)
-                thumbnail_url = asset_storage.get_thumbnail_url(asset_id)
+                # Use correct base_url: routes are at /multimodal, not /api/multimodal
+                asset_url = asset_storage.get_asset_url(asset_id, base_url="/multimodal")
+                thumbnail_url = asset_storage.get_thumbnail_url(asset_id, base_url="/multimodal")
             except Exception as e:
                 logger.debug(f"Failed to get asset URLs for {asset_id}: {e}")
                 asset_url = None
@@ -587,7 +596,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             chunks = data.get("chunks", [])
             logger.info(f"[/query] Received {len(chunks)} chunks from query result")
 
-            multimodal_results = _build_multimodal_results(
+            multimodal_results = await _build_multimodal_results(
                 chunks, asset_storage
             )
 
@@ -851,7 +860,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
             logger.info(f"[/query/stream] Received {len(chunks)} chunks from query result")
 
-            multimodal_results = _build_multimodal_results(
+            multimodal_results = await _build_multimodal_results(
                 chunks, asset_storage
             )
 
