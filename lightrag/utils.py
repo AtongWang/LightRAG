@@ -3185,28 +3185,50 @@ def convert_to_user_format(
 
         if original_entity:
             # Use original database data
-            formatted_entities.append(
-                {
-                    "entity_name": original_entity.get("entity_name", entity_name),
-                    "entity_type": original_entity.get("entity_type", "UNKNOWN"),
-                    "description": original_entity.get("description", ""),
-                    "source_id": original_entity.get("source_id", ""),
-                    "file_path": original_entity.get("file_path", "unknown_source"),
-                    "created_at": original_entity.get("created_at", ""),
-                }
-            )
+            entity_payload = {
+                "entity_name": original_entity.get("entity_name", entity_name),
+                "entity_type": original_entity.get("entity_type", "UNKNOWN"),
+                "description": original_entity.get("description", ""),
+                "source_id": original_entity.get("source_id", ""),
+                "file_path": original_entity.get("file_path", "unknown_source"),
+                "created_at": original_entity.get("created_at", ""),
+            }
+            for key in (
+                "is_multimodal",
+                "modal_type",
+                "asset_id",
+                "asset_path",
+                "table_html",
+                "table_markdown",
+                "equation_latex",
+                "multimodal_meta",
+            ):
+                if key in original_entity:
+                    entity_payload[key] = original_entity.get(key)
+            formatted_entities.append(entity_payload)
         else:
             # Fallback to LLM context data (for backward compatibility)
-            formatted_entities.append(
-                {
-                    "entity_name": entity_name,
-                    "entity_type": entity.get("type", "UNKNOWN"),
-                    "description": entity.get("description", ""),
-                    "source_id": entity.get("source_id", ""),
-                    "file_path": entity.get("file_path", "unknown_source"),
-                    "created_at": entity.get("created_at", ""),
-                }
-            )
+            entity_payload = {
+                "entity_name": entity_name,
+                "entity_type": entity.get("type", "UNKNOWN"),
+                "description": entity.get("description", ""),
+                "source_id": entity.get("source_id", ""),
+                "file_path": entity.get("file_path", "unknown_source"),
+                "created_at": entity.get("created_at", ""),
+            }
+            for key in (
+                "is_multimodal",
+                "modal_type",
+                "asset_id",
+                "asset_path",
+                "table_html",
+                "table_markdown",
+                "equation_latex",
+                "multimodal_meta",
+            ):
+                if key in entity:
+                    entity_payload[key] = entity.get(key)
+            formatted_entities.append(entity_payload)
 
     # Convert relationships format using original data when available
     formatted_relationships = []
@@ -3258,6 +3280,21 @@ def convert_to_user_format(
             "file_path": chunk.get("file_path", "unknown_source"),
             "chunk_id": chunk.get("chunk_id", ""),
         }
+        # Preserve multimodal metadata if present
+        for key in (
+            "is_multimodal",
+            "modal_type",
+            "asset_id",
+            "asset_path",
+            "table_html",
+            "table_markdown",
+            "equation_latex",
+            "description",
+            "page_idx",
+            "source_file",
+        ):
+            if key in chunk:
+                chunk_data[key] = chunk.get(key)
         formatted_chunks.append(chunk_data)
 
     logger.debug(

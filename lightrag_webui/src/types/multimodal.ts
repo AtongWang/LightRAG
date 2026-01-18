@@ -168,6 +168,8 @@ export interface MultimodalQueryResult {
   content_type: MultimodalType
   /** 内容ID */
   content_id: string
+  /** 资源ID */
+  asset_id?: string
   /** 文本描述 */
   description: string
   /** 资源访问URL */

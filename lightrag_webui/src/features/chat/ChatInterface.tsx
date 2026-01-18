@@ -4,10 +4,11 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, X, User, Bot, Sparkles, Settings2, ImageIcon } from 'lucide-react'
+import { Send, X, User, Bot, Settings2, ImageIcon } from 'lucide-react'
 import { useProjectStore, useSettingsStore } from '@/stores'
 import { cn } from '@/lib/utils'
-import { queryTextStream, Message as ApiMessage, QueryMode } from '@/api/lightrag'
+import { queryData, queryTextStream, Message as ApiMessage, QueryMode, QueryDataResponse } from '@/api/lightrag'
+import type { MultimodalQueryResult } from '@/types/multimodal'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import {
@@ -21,6 +22,9 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 import 'katex/dist/katex.min.css'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
+import { Badge } from '@/components/ui/Badge'
+import { Spinner } from '@/components/ui/Spinner'
 
 interface ReferenceItem {
   reference_id: string
@@ -44,6 +48,145 @@ interface MultimodalReference {
   equation_latex?: string
 }
 
+type InlineBlock =
+  | { type: 'text'; content: string }
+  | { type: 'multimodal'; items: MultimodalReference[] }
+
+const normalizeText = (value?: string) =>
+  (value || '')
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+
+function enrichMultimodalItems(
+  items: MultimodalReference[],
+  fallback?: MultimodalReference[]
+): MultimodalReference[] {
+  if (!fallback || fallback.length === 0) return items
+
+  const matchBy = (item: MultimodalReference) => {
+    if (item.asset_id) {
+      return fallback.find(candidate => candidate.asset_id === item.asset_id)
+    }
+    if (item.source_file && item.type) {
+      return fallback.find(
+        candidate => candidate.type === item.type && candidate.source_file === item.source_file
+      )
+    }
+    if (item.description && item.type) {
+      const needle = normalizeText(item.description)
+      return fallback.find(candidate => {
+        if (candidate.type !== item.type || !candidate.description) return false
+        const haystack = normalizeText(candidate.description)
+        return needle.length > 0 && (haystack.includes(needle) || needle.includes(haystack))
+      })
+    }
+    return undefined
+  }
+
+  return items.map(item => {
+    const fallbackItem = matchBy(item)
+    if (!fallbackItem) return item
+    return {
+      ...fallbackItem,
+      ...item,
+      table_data: item.table_data ?? fallbackItem.table_data,
+      table_html: item.table_html ?? fallbackItem.table_html,
+      equation_latex: item.equation_latex ?? fallbackItem.equation_latex,
+      image_data: item.image_data ?? fallbackItem.image_data,
+      asset_url: item.asset_url ?? fallbackItem.asset_url,
+      source_file: item.source_file ?? fallbackItem.source_file
+    }
+  })
+}
+
+function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
+  const lines = content.split('\n')
+  const blocks: InlineBlock[] = []
+  let buffer: string[] = []
+  let i = 0
+
+  const flushBuffer = () => {
+    if (buffer.length > 0) {
+      blocks.push({ type: 'text', content: buffer.join('\n') })
+      buffer = []
+    }
+  }
+
+  const isMultimodalHeader = (value: string) =>
+    /^\s*#{0,6}\s*(Multimodal|多模态)\b\s*[:：]?/i.test(value) ||
+    /^\s*(Multimodal|多模态)\b\s*[:：]?/i.test(value)
+
+  const isSectionHeader = (value: string) =>
+    /^\s*#{1,6}\s+/.test(value) || /^\s*(参考文献|References)\b/i.test(value)
+
+  while (i < lines.length) {
+    const line = lines[i]
+    if (!isMultimodalHeader(line)) {
+      buffer.push(line)
+      i += 1
+      continue
+    }
+
+    const rawLines: string[] = [line]
+    i += 1
+    while (i < lines.length && lines[i].trim() === '') {
+      rawLines.push(lines[i])
+      i += 1
+    }
+
+    let jsonText = ''
+    if (i < lines.length && lines[i].trim().startsWith('```')) {
+      rawLines.push(lines[i])
+      i += 1
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        jsonText += `${lines[i]}\n`
+        rawLines.push(lines[i])
+        i += 1
+      }
+      if (i < lines.length && lines[i].trim().startsWith('```')) {
+        rawLines.push(lines[i])
+        i += 1
+      }
+    } else {
+      while (i < lines.length && lines[i].trim() !== '' && !isSectionHeader(lines[i])) {
+        jsonText += `${lines[i]}\n`
+        rawLines.push(lines[i])
+        i += 1
+      }
+    }
+
+    let parsedItems: MultimodalReference[] | null = null
+    try {
+      const parsed = JSON.parse(jsonText.trim())
+      if (parsed && Array.isArray(parsed.items)) {
+        parsedItems = parsed.items.map((item: any) => ({
+          type: item.type || 'generic',
+          asset_id: item.asset_id,
+          asset_url: item.asset_url,
+          description: item.description,
+          source_file: item.source_file,
+          image_data: item.image_data,
+          table_data: item.table_markdown || item.table_data,
+          table_html: item.table_html,
+          equation_latex: item.equation_latex
+        }))
+      }
+    } catch {
+      parsedItems = null
+    }
+
+    if (parsedItems && parsedItems.length > 0) {
+      flushBuffer()
+      blocks.push({ type: 'multimodal', items: parsedItems })
+    } else {
+      buffer.push(...rawLines)
+    }
+  }
+
+  flushBuffer()
+  return blocks
+}
+
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -51,6 +194,9 @@ interface ChatMessage {
   timestamp: Date
   references?: ReferenceItem[]
   multimodal?: MultimodalReference[]
+  retrievalData?: QueryDataResponse
+  retrievalLoading?: boolean
+  retrievalError?: string
   isWelcome?: boolean
 }
 
@@ -61,7 +207,8 @@ export function ChatInterface() {
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
   const [queryMode, setQueryMode] = useState<QueryMode>('mix')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [retrievalOpen, setRetrievalOpen] = useState<Record<string, boolean>>({})
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const welcomeItems = [
     '回答关于知识图谱的问题',
@@ -88,8 +235,69 @@ export function ChatInterface() {
   }, [messages])
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const container = messagesContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
   }
+
+  const hasInlineMultimodal = (content: string) =>
+    parseInlineMultimodalBlocks(content).some(block => block.type === 'multimodal')
+
+  const renderMultimodalItems = (items: MultimodalReference[], keyPrefix: string) => (
+    <div className="space-y-3">
+      {items.map((item, index) => (
+        <div
+          key={`${keyPrefix}-${index}`}
+          className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800/50"
+        >
+          <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+            <span className="text-base">
+              {item.type === 'image' ? '🖼️' : item.type === 'table' ? '📊' : item.type === 'equation' ? '📐' : '📎'}
+            </span>
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+              {item.type === 'image' ? '图片' : item.type === 'table' ? '表格' : item.type === 'equation' ? '公式' : '附件'}
+            </span>
+            {item.source_file && (
+              <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto truncate max-w-[150px]">
+                {item.source_file}
+              </span>
+            )}
+          </div>
+
+          <div className="p-3">
+            {item.type === 'image' && (
+              <MultimodalImage
+                assetId={item.asset_id}
+                src={item.asset_url}
+                base64Data={item.image_data}
+                alt={item.description}
+                maxHeight={200}
+              />
+            )}
+
+            {item.type === 'table' && (
+              <MultimodalTable
+                htmlData={item.table_html}
+                markdownData={item.table_data}
+                maxHeight={200}
+                expandable
+              />
+            )}
+
+            {item.type === 'equation' && item.equation_latex && (
+              <MultimodalEquation latex={item.equation_latex} />
+            )}
+
+            {item.description && (
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                {item.description}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 
   // 构建对话历史（排除系统消息和欢迎消息）
   const buildConversationHistory = useCallback((): ApiMessage[] => {
@@ -122,15 +330,51 @@ export function ChatInterface() {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
-      timestamp: new Date()
+      timestamp: new Date(),
+      retrievalLoading: true
     }
     setMessages(prev => [...prev, assistantMessage])
+    setRetrievalOpen(prev => ({ ...prev, [assistantMessageId]: true }))
 
     // 创建 AbortController 用于取消请求
     abortControllerRef.current = new AbortController()
 
     try {
       const conversationHistory = buildConversationHistory()
+
+      const retrievalRequest = {
+        query: queryText,
+        mode: queryMode,
+        stream: false,
+        conversation_history: conversationHistory,
+        top_k: querySettings.top_k,
+        chunk_top_k: querySettings.chunk_top_k,
+        max_total_tokens: querySettings.max_total_tokens,
+        enable_rerank: querySettings.enable_rerank,
+        project_id: currentProject?.project_id,
+      }
+
+      // Fire retrieval in parallel so users can see results panel while streaming continues.
+      queryData(retrievalRequest)
+        .then((data) => {
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, retrievalData: data, retrievalLoading: false }
+                : msg
+            )
+          )
+        })
+        .catch((error) => {
+          const errorMsg = error instanceof Error ? error.message : '检索结果获取失败'
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, retrievalError: errorMsg, retrievalLoading: false }
+                : msg
+            )
+          )
+        })
       
       await queryTextStream(
         {
@@ -161,6 +405,38 @@ export function ChatInterface() {
             prev.map(msg =>
               msg.id === assistantMessageId
                 ? { ...msg, content: msg.content || '抱歉，处理您的请求时发生错误。', role: 'system' as const }
+                : msg
+            )
+          )
+        },
+        (meta) => {
+          console.log('[ChatInterface] Received meta:', meta)
+          console.log('[ChatInterface] Multimodal results:', meta.multimodal_results)
+
+          const multimodal = Array.isArray(meta.multimodal_results)
+            ? meta.multimodal_results.map((item: MultimodalQueryResult) => ({
+                type: item.content_type,
+                asset_id: item.asset_id,
+                asset_url: item.asset_url,
+                description: item.description,
+                source_file: item.source_file,
+                image_data: item.image_data,
+                table_data: item.table_markdown,
+                table_html: item.table_html,
+                equation_latex: item.equation_latex
+              }))
+            : undefined
+
+          console.log('[ChatInterface] Processed multimodal:', multimodal)
+
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    references: meta.references ?? msg.references,
+                    multimodal: multimodal ?? msg.multimodal
+                  }
                 : msg
             )
           )
@@ -195,7 +471,11 @@ export function ChatInterface() {
   return (
     <div className="flex flex-col h-full w-full bg-white dark:bg-[hsl(var(--card))]">
       {/* 消息列表 - flex-1 确保可滚动，overflow-y-scroll 始终显示滚动条 */}
-      <div className="flex-1 overflow-y-scroll p-6 space-y-4" style={{ scrollbarWidth: 'thin', scrollbarColor: 'hsl(var(--border)) transparent' }}>
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-scroll p-6 space-y-4"
+        style={{ scrollbarWidth: 'thin', scrollbarColor: 'hsl(var(--border)) transparent' }}
+      >
         {messages.filter(msg => msg.content).map(message => (
           <div
             key={message.id}
@@ -255,14 +535,35 @@ export function ChatInterface() {
                         <div className="pt-1 text-muted-foreground">请随时向我提问。</div>
                       </div>
                     ) : message.role === 'assistant' ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:text-[hsl(var(--vermillion))] prose-code:bg-[hsl(var(--muted))] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkGfm, remarkMath]}
-                          rehypePlugins={[rehypeKatex]}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                      </div>
+                      (() => {
+                        const inlineBlocks = parseInlineMultimodalBlocks(message.content)
+                        return (
+                          <div className="space-y-3">
+                            {inlineBlocks.map((block, blockIndex) => (
+                              block.type === 'text' ? (
+                                <div
+                                  key={`text-${message.id}-${blockIndex}`}
+                                  className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:text-[hsl(var(--vermillion))] prose-code:bg-[hsl(var(--muted))] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none"
+                                >
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm, remarkMath]}
+                                    rehypePlugins={[rehypeKatex]}
+                                  >
+                                    {block.content}
+                                  </ReactMarkdown>
+                                </div>
+                              ) : (
+                                <div key={`mm-${message.id}-${blockIndex}`} className="space-y-2">
+                                  {renderMultimodalItems(
+                                    enrichMultimodalItems(block.items, message.multimodal),
+                                    `${message.id}-inline-${blockIndex}`
+                                  )}
+                                </div>
+                              )
+                            ))}
+                          </div>
+                        )
+                      })()
                     ) : (
                       <div className="whitespace-pre-wrap text-sm leading-relaxed">
                         {message.content}
@@ -270,93 +571,162 @@ export function ChatInterface() {
                     )
                   )}
 
-                  {/* 多模态内容展示 */}
-                  {message.multimodal && message.multimodal.length > 0 && (
+                  {/* 多模态内容展示 (fallback when no inline blocks) */}
+                  {!hasInlineMultimodal(message.content) &&
+                    message.multimodal &&
+                    message.multimodal.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                          <ImageIcon className="w-3 h-3 text-[hsl(var(--jade))]" />
+                          <span>相关多模态内容：</span>
+                        </div>
+                        {renderMultimodalItems(message.multimodal, `${message.id}-fallback`)}
+                      </div>
+                    )}
+
+                  {message.role === 'assistant' && (message.retrievalLoading || message.retrievalData || message.retrievalError) && (
                     <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                        <ImageIcon className="w-3 h-3 text-[hsl(var(--jade))]" />
-                        <span>相关多模态内容：</span>
-                      </div>
-                      <div className="space-y-3">
-                        {message.multimodal.map((item, index) => (
-                          <div 
-                            key={`mm-${index}`} 
-                            className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800/50"
-                          >
-                            {/* 多模态内容标题 */}
-                            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                              <span className="text-base">
-                                {item.type === 'image' ? '🖼️' : item.type === 'table' ? '📊' : item.type === 'equation' ? '📐' : '📎'}
-                              </span>
-                              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                {item.type === 'image' ? '图片' : item.type === 'table' ? '表格' : item.type === 'equation' ? '公式' : '附件'}
-                              </span>
-                              {item.source_file && (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto truncate max-w-[150px]">
-                                  {item.source_file}
-                                </span>
-                              )}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">检索结果</Badge>
+                          {message.retrievalData && (
+                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                              <span>实体 {message.retrievalData.data.entities.length}</span>
+                              <span>关系 {message.retrievalData.data.relationships.length}</span>
+                              <span>片段 {message.retrievalData.data.chunks.length}</span>
                             </div>
-                            
-                            {/* 多模态内容渲染 */}
-                            <div className="p-3">
-                              {item.type === 'image' && (
-                                <MultimodalImage
-                                  assetId={item.asset_id}
-                                  src={item.asset_url}
-                                  base64Data={item.image_data}
-                                  alt={item.description}
-                                  maxHeight={200}
-                                />
-                              )}
-                              
-                              {item.type === 'table' && (
-                                <MultimodalTable
-                                  htmlData={item.table_html}
-                                  markdownData={item.table_data}
-                                  maxHeight={200}
-                                  expandable
-                                />
-                              )}
-                              
-                              {item.type === 'equation' && item.equation_latex && (
-                                <MultimodalEquation
-                                  latex={item.equation_latex}
-                                />
-                              )}
-                              
-                              {/* 描述 */}
-                              {item.description && (
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                                  {item.description}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() =>
+                            setRetrievalOpen(prev => ({
+                              ...prev,
+                              [message.id]: !prev[message.id]
+                            }))
+                          }
+                        >
+                          {retrievalOpen[message.id] ? '收起' : '展开'}
+                        </button>
                       </div>
+
+                      {retrievalOpen[message.id] && (
+                        <div className="mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-3">
+                          {message.retrievalLoading && (
+                            <div
+                              className="flex items-center gap-2 text-xs text-muted-foreground"
+                              role="status"
+                              aria-label="正在获取检索结果"
+                            >
+                              <Spinner className="w-4 h-4" />
+                              <span>正在获取检索结果...</span>
+                            </div>
+                          )}
+
+                          {message.retrievalError && !message.retrievalLoading && (
+                            <div className="text-xs text-red-500">
+                              {message.retrievalError}
+                            </div>
+                          )}
+
+                          {message.retrievalData && !message.retrievalLoading && (
+                            <Tabs defaultValue="entities" className="w-full">
+                              <TabsList className="w-full justify-start bg-transparent p-0">
+                                <TabsTrigger value="entities" className="text-xs">
+                                  实体
+                                </TabsTrigger>
+                                <TabsTrigger value="relations" className="text-xs">
+                                  关系
+                                </TabsTrigger>
+                                <TabsTrigger value="chunks" className="text-xs">
+                                  片段
+                                </TabsTrigger>
+                              </TabsList>
+
+                              <TabsContent value="entities" className="mt-3">
+                                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                  {message.retrievalData.data.entities.map((item, index) => (
+                                    <div key={`ent-${index}`} className="rounded-lg border border-[hsl(var(--border))] bg-white/70 p-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-foreground">{item.entity_name}</span>
+                                        <Badge className="text-[10px]" variant="secondary">
+                                          {item.entity_type}
+                                        </Badge>
+                                      </div>
+                                      {item.description && (
+                                        <p className="mt-1 max-h-16 overflow-hidden text-xs text-muted-foreground">
+                                          {item.description}
+                                        </p>
+                                      )}
+                                      {item.file_path && (
+                                        <p className="mt-1 text-[10px] text-muted-foreground truncate">
+                                          {item.file_path}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </TabsContent>
+
+                              <TabsContent value="relations" className="mt-3">
+                                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                  {message.retrievalData.data.relationships.map((item, index) => (
+                                    <div key={`rel-${index}`} className="rounded-lg border border-[hsl(var(--border))] bg-white/70 p-2">
+                                      <div className="text-xs font-semibold text-foreground">
+                                        {item.src_id} → {item.tgt_id}
+                                      </div>
+                                      {item.description && (
+                                        <p className="mt-1 max-h-16 overflow-hidden text-xs text-muted-foreground">
+                                          {item.description}
+                                        </p>
+                                      )}
+                                      {item.file_path && (
+                                        <p className="mt-1 text-[10px] text-muted-foreground truncate">
+                                          {item.file_path}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </TabsContent>
+
+                              <TabsContent value="chunks" className="mt-3">
+                                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                  {message.retrievalData.data.chunks.map((item, index) => (
+                                    <div key={`chk-${index}`} className="rounded-lg border border-[hsl(var(--border))] bg-white/70 p-2">
+                                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                        <span className="font-medium text-foreground">[{item.reference_id || '-'}]</span>
+                                        {item.is_multimodal && (
+                                          <Badge className="text-[10px]" variant="secondary">
+                                            {item.modal_type || 'multimodal'}
+                                          </Badge>
+                                        )}
+                                        {item.chunk_id && (
+                                          <span className="truncate">{item.chunk_id}</span>
+                                        )}
+                                      </div>
+                                      {item.content && (
+                                        <p className="mt-1 max-h-20 overflow-hidden text-xs text-muted-foreground">
+                                          {item.content}
+                                        </p>
+                                      )}
+                                      {item.file_path && (
+                                        <p className="mt-1 text-[10px] text-muted-foreground truncate">
+                                          {item.file_path}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </TabsContent>
+                            </Tabs>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* 知识来源 */}
-                  {message.references && message.references.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Sparkles className="w-3 h-3 text-[hsl(var(--gold))]" />
-                        <span>知识来源：</span>
-                      </div>
-                      <div className="mt-2 space-y-1">
-                        {message.references.map((ref, index) => (
-                          <div key={index} className="text-xs text-muted-foreground">
-                            <span className="font-medium text-foreground">[{ref.reference_id}]</span>
-                            <span className="ml-2 opacity-80 truncate max-w-[300px] inline-block align-bottom">
-                              {ref.file_path}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {/* 时间戳 */}
@@ -389,7 +759,6 @@ export function ChatInterface() {
           </div>
         )}
 
-        <div ref={messagesEndRef} />
       </div>
 
       {/* 输入区域 - 固定在底部 */}

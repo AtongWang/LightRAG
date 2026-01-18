@@ -3866,6 +3866,14 @@ async def _apply_token_truncation(
                 "description": entity.get("description", "UNKNOWN"),
                 "created_at": created_at,
                 "file_path": entity.get("file_path", "unknown_source"),
+                "is_multimodal": entity.get("is_multimodal"),
+                "modal_type": entity.get("modal_type"),
+                "asset_id": entity.get("asset_id"),
+                "asset_path": entity.get("asset_path"),
+                "table_html": entity.get("table_html"),
+                "table_markdown": entity.get("table_markdown"),
+                "equation_latex": entity.get("equation_latex"),
+                "multimodal_meta": entity.get("multimodal_meta"),
             }
         )
 
@@ -4182,16 +4190,29 @@ async def _build_context_str(
         truncated_chunks
     )
 
-    # Rebuild chunks_context with truncated chunks
+    # Rebuild chunks_context with truncated chunks (include multimodal metadata when present)
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
     chunks_context = []
     for i, chunk in enumerate(truncated_chunks):
-        chunks_context.append(
-            {
-                "reference_id": chunk["reference_id"],
-                "content": chunk["content"],
-            }
-        )
+        chunk_payload = {
+            "reference_id": chunk["reference_id"],
+            "content": chunk["content"],
+        }
+        for key in (
+            "is_multimodal",
+            "modal_type",
+            "asset_id",
+            "asset_path",
+            "table_html",
+            "table_markdown",
+            "equation_latex",
+            "description",
+            "page_idx",
+            "source_file",
+        ):
+            if key in chunk:
+                chunk_payload[key] = chunk.get(key)
+        chunks_context.append(chunk_payload)
 
     text_units_str = "\n".join(
         json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context
@@ -4258,6 +4279,21 @@ async def _build_context_str(
         entity_id_to_original,
         relation_id_to_original,
     )
+    if "metadata" not in final_data:
+        final_data["metadata"] = {}
+    include_llm_context = bool(
+        global_config.get("include_llm_context_str", False)
+    )
+    final_data["metadata"]["llm_context_payload"] = {
+        "entities": entities_context,
+        "relationships": relations_context,
+        "chunks": chunks_context,
+        "references": reference_list,
+        "query_mode": query_param.mode,
+    }
+    if include_llm_context:
+        max_context_chars = int(global_config.get("llm_context_str_max_chars", 20000))
+        final_data["metadata"]["llm_context_str"] = result[:max_context_chars]
     logger.debug(
         f"[_build_context_str] Final data after conversion: {len(final_data.get('entities', []))} entities, {len(final_data.get('relationships', []))} relationships, {len(final_data.get('chunks', []))} chunks"
     )

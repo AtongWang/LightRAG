@@ -6,6 +6,7 @@ import json
 from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
+from lightrag.types import MultimodalQueryResult
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
@@ -172,6 +173,10 @@ class QueryResponse(BaseModel):
         default=None,
         description="Reference list (Disabled when include_references=False, /query/data always includes references.)",
     )
+    multimodal_results: Optional[List[MultimodalQueryResult]] = Field(
+        default=None,
+        description="Multimodal results derived from retrieved chunks",
+    )
 
 
 class QueryDataResponse(BaseModel):
@@ -192,6 +197,10 @@ class StreamChunkResponse(BaseModel):
         default=None,
         description="Reference list (only in first chunk when include_references=True)",
     )
+    multimodal_results: Optional[List[MultimodalQueryResult]] = Field(
+        default=None,
+        description="Multimodal results (only in first chunk if present)",
+    )
     response: Optional[str] = Field(
         default=None, description="Response content chunk or complete response"
     )
@@ -200,8 +209,68 @@ class StreamChunkResponse(BaseModel):
     )
 
 
+def _build_multimodal_results(
+    chunks: List[Dict[str, Any]] | None,
+    asset_storage: Any | None,
+) -> List[Dict[str, Any]]:
+    if not chunks:
+        logger.debug(f"[_build_multimodal_results] No chunks provided")
+        return []
+
+    logger.debug(f"[_build_multimodal_results] Processing {len(chunks)} chunks")
+    results: List[Dict[str, Any]] = []
+    multimodal_count = 0
+
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        if not chunk.get("is_multimodal"):
+            continue
+
+        modal_type = chunk.get("modal_type") or "generic"
+        asset_id = chunk.get("asset_id")
+        asset_url = None
+        thumbnail_url = None
+        if asset_storage and asset_id:
+            try:
+                asset_url = asset_storage.get_asset_url(asset_id)
+                thumbnail_url = asset_storage.get_thumbnail_url(asset_id)
+            except Exception as e:
+                logger.debug(f"Failed to get asset URLs for {asset_id}: {e}")
+                asset_url = None
+                thumbnail_url = None
+
+        results.append(
+            MultimodalQueryResult(
+                content_type=modal_type,
+                content_id=chunk.get("chunk_id", ""),
+                asset_id=asset_id,
+                description=chunk.get("description") or chunk.get("content", ""),
+                asset_url=asset_url,
+                thumbnail_url=thumbnail_url,
+                table_html=chunk.get("table_html"),
+                table_markdown=chunk.get("table_markdown"),
+                equation_latex=chunk.get("equation_latex"),
+                source_file=chunk.get("file_path") or chunk.get("source_file"),
+                page_index=chunk.get("page_idx"),
+            ).model_dump()
+        )
+        multimodal_count += 1
+
+    logger.debug(f"[_build_multimodal_results] Found {multimodal_count} multimodal chunks")
+    logger.debug(f"[_build_multimodal_results] Returning {len(results)} results")
+    return results
+
+
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
+    asset_storage = None
+    try:
+        from lightrag.kg.multimodal_storage import MultimodalAssetStorage
+
+        asset_storage = MultimodalAssetStorage(working_dir=rag.working_dir)
+    except Exception:
+        asset_storage = None
 
     async def get_project_chunk_ids(project_id: str) -> list[str]:
         """
@@ -514,11 +583,29 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
+            # Extract chunks for multimodal processing
+            chunks = data.get("chunks", [])
+            logger.info(f"[/query] Received {len(chunks)} chunks from query result")
+
+            multimodal_results = _build_multimodal_results(
+                chunks, asset_storage
+            )
+
+            logger.info(f"[/query] Returning {len(multimodal_results) if multimodal_results else 0} multimodal results")
+
             # Return response with or without references based on request
             if request.include_references:
-                return QueryResponse(response=response_content, references=references)
+                return QueryResponse(
+                    response=response_content,
+                    references=references,
+                    multimodal_results=multimodal_results or None,
+                )
             else:
-                return QueryResponse(response=response_content, references=None)
+                return QueryResponse(
+                    response=response_content,
+                    references=None,
+                    multimodal_results=multimodal_results or None,
+                )
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
@@ -759,16 +846,26 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
             # Unified approach: always use aquery_llm for all cases
             result = await rag.aquery_llm(request.query, param=param)
+            data = result.get("data", {})
+            chunks = data.get("chunks", [])
+
+            logger.info(f"[/query/stream] Received {len(chunks)} chunks from query result")
+
+            multimodal_results = _build_multimodal_results(
+                chunks, asset_storage
+            )
+
+            logger.info(f"[/query/stream] Built {len(multimodal_results) if multimodal_results else 0} multimodal results")
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
-                references = result.get("data", {}).get("references", [])
+                references = data.get("references", [])
                 llm_response = result.get("llm_response", {})
 
                 # Enrich references with chunk content if requested
                 if request.include_references and request.include_chunk_content:
-                    data = result.get("data", {})
-                    chunks = data.get("chunks", [])
+                    data_payload = result.get("data", {})
+                    chunks = data_payload.get("chunks", [])
                     # Create a mapping from reference_id to chunk content
                     ref_id_to_content = {}
                     for chunk in chunks:
@@ -790,9 +887,14 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     references = enriched_references
 
                 if llm_response.get("is_streaming"):
-                    # Streaming mode: send references first, then stream response chunks
+                    # Streaming mode: send references/multimodal first, then stream response chunks
+                    first_chunk = {}
                     if request.include_references:
-                        yield f"{json.dumps({'references': references})}\n"
+                        first_chunk["references"] = references
+                    if multimodal_results:
+                        first_chunk["multimodal_results"] = multimodal_results
+                    if first_chunk:
+                        yield f"{json.dumps(first_chunk)}\n"
 
                     response_stream = llm_response.get("response_iterator")
                     if response_stream:
@@ -813,6 +915,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     complete_response = {"response": response_content}
                     if request.include_references:
                         complete_response["references"] = references
+                    if multimodal_results:
+                        complete_response["multimodal_results"] = multimodal_results
 
                     yield f"{json.dumps(complete_response)}\n"
 

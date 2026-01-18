@@ -133,6 +133,9 @@ class MultimodalQueryResult(BaseModel):
     
     content_id: str
     """ID of the content (chunk_id or entity_id)"""
+
+    asset_id: Optional[str] = None
+    """Asset ID for the multimodal content"""
     
     description: str
     """Text description of the content"""

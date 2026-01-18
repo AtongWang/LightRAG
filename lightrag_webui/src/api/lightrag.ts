@@ -4,6 +4,7 @@ import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/state'
 import { navigationService } from '@/services/navigation'
+import type { MultimodalQueryResult } from '@/types/multimodal'
 
 // Types
 export type LightragNodeType = {
@@ -144,6 +145,68 @@ export type QueryRequest = {
 
 export type QueryResponse = {
   response: string
+  references?: ReferenceItem[]
+  multimodal_results?: MultimodalQueryResult[]
+}
+
+export type QueryDataEntity = {
+  entity_name: string
+  entity_type: string
+  description: string
+  source_id: string
+  file_path: string
+  created_at: number | string
+}
+
+export type QueryDataRelation = {
+  src_id: string
+  tgt_id: string
+  description: string
+  keywords: string
+  weight: number
+  source_id: string
+  file_path: string
+  created_at: number | string
+}
+
+export type QueryDataChunk = {
+  reference_id: string
+  content: string
+  file_path: string
+  chunk_id: string
+  is_multimodal?: boolean
+  modal_type?: string
+  asset_id?: string
+  asset_path?: string
+  table_html?: string
+  table_markdown?: string
+  equation_latex?: string
+  description?: string
+  page_idx?: number
+  source_file?: string
+}
+
+export type QueryDataResponse = {
+  status: string
+  message: string
+  data: {
+    entities: QueryDataEntity[]
+    relationships: QueryDataRelation[]
+    chunks: QueryDataChunk[]
+    references: ReferenceItem[]
+  }
+  metadata: Record<string, any>
+}
+
+export type ReferenceItem = {
+  reference_id: string
+  file_path: string
+  content?: string[]
+}
+
+export type StreamMeta = {
+  references?: ReferenceItem[]
+  multimodal_results?: MultimodalQueryResult[]
 }
 
 export type EntityUpdateResponse = {
@@ -518,10 +581,16 @@ export const queryText = async (request: QueryRequest): Promise<QueryResponse> =
   return response.data
 }
 
+export const queryData = async (request: QueryRequest): Promise<QueryDataResponse> => {
+  const response = await axiosInstance.post('/query/data', request)
+  return response.data
+}
+
 export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  onMeta?: (meta: StreamMeta) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
@@ -537,6 +606,16 @@ export const queryTextStream = async (
   }
 
   try {
+    const emitMeta = (parsed: any) => {
+      if (parsed.references || parsed.multimodal_results) {
+        onMeta?.({
+          references: parsed.references,
+          multimodal_results: parsed.multimodal_results
+        });
+        return true;
+      }
+      return false;
+    };
     const response = await fetch(`${backendBaseUrl}/query/stream`, {
       method: 'POST',
       headers: headers,
@@ -576,9 +655,10 @@ export const queryTextStream = async (
               throw new Error('Response body is null');
             }
 
-            const reader = retryResponse.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
+    const reader = retryResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let metaEmitted = false;
 
             while (true) {
               const { done, value } = await reader.read();
@@ -592,11 +672,16 @@ export const queryTextStream = async (
                 if (line.trim()) {
                   try {
                     const parsed = JSON.parse(line);
-                    if (parsed.response) {
-                      onChunk(parsed.response);
-                    } else if (parsed.error) {
-                      onError?.(parsed.error);
+                    console.log('[queryTextStream] Parsed:', parsed)
+                    if (!metaEmitted) {
+                      console.log('[queryTextStream] Emitting meta, references:', parsed.references?.length, 'multimodal:', parsed.multimodal_results?.length)
+                      metaEmitted = emitMeta(parsed);
                     }
+                  if (parsed.response) {
+                    onChunk(parsed.response);
+                  } else if (parsed.error) {
+                    onError?.(parsed.error);
+                  }
                   } catch (parseError) {
                     console.error('Failed to parse JSON:', parseError, 'Line:', line);
                     onError?.(`JSON parse error: ${parseError}`);
@@ -609,6 +694,9 @@ export const queryTextStream = async (
             if (buffer.trim()) {
               try {
                 const parsed = JSON.parse(buffer);
+                if (!metaEmitted) {
+                  metaEmitted = emitMeta(parsed);
+                }
                 if (parsed.response) {
                   onChunk(parsed.response);
                 } else if (parsed.error) {
@@ -657,6 +745,7 @@ export const queryTextStream = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let metaEmitted = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -675,6 +764,9 @@ export const queryTextStream = async (
         if (line.trim()) {
           try {
             const parsed = JSON.parse(line);
+            if (!metaEmitted) {
+              metaEmitted = emitMeta(parsed);
+            }
             if (parsed.response) {
               onChunk(parsed.response);
             } else if (parsed.error && onError) {
@@ -692,6 +784,9 @@ export const queryTextStream = async (
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer);
+        if (!metaEmitted) {
+          metaEmitted = emitMeta(parsed);
+        }
         if (parsed.response) {
           onChunk(parsed.response);
         } else if (parsed.error && onError) {
