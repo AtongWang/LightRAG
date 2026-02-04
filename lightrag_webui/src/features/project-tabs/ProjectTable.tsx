@@ -21,18 +21,19 @@ export default function ProjectTable() {
   const rawGraph = useGraphStore.use.rawGraph()
   const graphDataVersion = useGraphStore.use.graphDataVersion()
 
-  // 进入项目表格页面时，清空全局 queryLabel，防止全局图谱获取覆盖项目数据
+  // 进入项目表格页面或切换项目时，清空全局 queryLabel，防止全局图谱获取覆盖项目数据
   useEffect(() => {
+    const graphStore = useGraphStore.getState()
     useSettingsStore.getState().setQueryLabel('')
-    useGraphStore.getState().setGraphDataFetchAttempted(true)
-  }, [])
+    graphStore.setGraphDataFetchAttempted(true)
+    graphStore.setRawGraph(null)
+    graphStore.setSigmaGraph(null)
+    graphStore.setGraphIsEmpty(false)
+  }, [projectId])
 
   // 加载项目图谱数据（如果还没有加载）
   const loadProjectGraph = useCallback(async () => {
     if (!projectId) return
-
-    // 如果已经有数据了，不重新加载（除非是刷新）
-    if (rawGraph && rawGraph.nodes.length > 0) return
 
     setIsLoading(true)
     setError(null)
@@ -137,7 +138,7 @@ export default function ProjectTable() {
     } finally {
       setIsLoading(false)
     }
-  }, [projectId, rawGraph])
+  }, [projectId])
 
   // 初始加载
   useEffect(() => {

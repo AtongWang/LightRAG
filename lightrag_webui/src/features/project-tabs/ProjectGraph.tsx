@@ -80,12 +80,15 @@ export default function ProjectGraph() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 进入项目图谱页面时，清空全局 queryLabel，防止 useLightragGraph 钩子触发全局图谱获取
+  // 进入项目图谱页面或切换项目时，清空全局 queryLabel，防止 useLightragGraph 钩子触发全局图谱获取
   useEffect(() => {
-    // 清空 queryLabel 并重置相关状态
+    const graphStore = useGraphStore.getState()
     useSettingsStore.getState().setQueryLabel('')
-    useGraphStore.getState().setGraphDataFetchAttempted(true) // 阻止自动获取
-  }, [])
+    graphStore.setGraphDataFetchAttempted(true)
+    graphStore.setRawGraph(null)
+    graphStore.setSigmaGraph(null)
+    graphStore.setGraphIsEmpty(false)
+  }, [projectId])
 
   // Calculate stats from graph data
   const nodeCount = rawGraph?.nodes?.length || 0

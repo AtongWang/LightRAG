@@ -506,7 +506,9 @@ async def _handle_single_relationship_extraction(
                 record_attributes[4], remove_inner_quotes=True
             )
             edge_keywords = edge_keywords.replace("，", ",")
-            edge_description = sanitize_and_normalize_extracted_text(record_attributes[5])
+            edge_description = sanitize_and_normalize_extracted_text(
+                record_attributes[5]
+            )
         else:
             # Old format (5 fields) - no relation_type
             relation_type = ""
@@ -514,7 +516,9 @@ async def _handle_single_relationship_extraction(
                 record_attributes[3], remove_inner_quotes=True
             )
             edge_keywords = edge_keywords.replace("，", ",")
-            edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
+            edge_description = sanitize_and_normalize_extracted_text(
+                record_attributes[4]
+            )
 
         edge_source_id = chunk_key
         weight = (
@@ -1634,7 +1638,14 @@ async def _merge_nodes_then_upsert(
         already_file_paths.extend(already_node["file_path"].split(GRAPH_FIELD_SEP))
         already_description.extend(already_node["description"].split(GRAPH_FIELD_SEP))
         # Preserve existing multimodal attributes
-        for attr in ["asset_path", "asset_id", "modal_type", "table_html", "table_markdown", "equation_latex"]:
+        for attr in [
+            "asset_path",
+            "asset_id",
+            "modal_type",
+            "table_html",
+            "table_markdown",
+            "equation_latex",
+        ]:
             if already_node.get(attr):
                 already_multimodal_attrs[attr] = already_node[attr]
 
@@ -1884,20 +1895,41 @@ async def _merge_nodes_then_upsert(
                 if not chunk_data.get("is_multimodal"):
                     continue
                 # Only fill missing keys (keep first occurrence)
-                if chunk_data.get("asset_path") and "asset_path" not in multimodal_attrs:
+                if (
+                    chunk_data.get("asset_path")
+                    and "asset_path" not in multimodal_attrs
+                ):
                     multimodal_attrs["asset_path"] = chunk_data.get("asset_path")
                 if chunk_data.get("asset_id") and "asset_id" not in multimodal_attrs:
                     multimodal_attrs["asset_id"] = chunk_data.get("asset_id")
-                if chunk_data.get("modal_type") and "modal_type" not in multimodal_attrs:
+                if (
+                    chunk_data.get("modal_type")
+                    and "modal_type" not in multimodal_attrs
+                ):
                     multimodal_attrs["modal_type"] = chunk_data.get("modal_type")
-                if chunk_data.get("table_html") and "table_html" not in multimodal_attrs:
+                if (
+                    chunk_data.get("table_html")
+                    and "table_html" not in multimodal_attrs
+                ):
                     multimodal_attrs["table_html"] = chunk_data.get("table_html")
-                if chunk_data.get("table_markdown") and "table_markdown" not in multimodal_attrs:
-                    multimodal_attrs["table_markdown"] = chunk_data.get("table_markdown")
-                if chunk_data.get("equation_latex") and "equation_latex" not in multimodal_attrs:
-                    multimodal_attrs["equation_latex"] = chunk_data.get("equation_latex")
+                if (
+                    chunk_data.get("table_markdown")
+                    and "table_markdown" not in multimodal_attrs
+                ):
+                    multimodal_attrs["table_markdown"] = chunk_data.get(
+                        "table_markdown"
+                    )
+                if (
+                    chunk_data.get("equation_latex")
+                    and "equation_latex" not in multimodal_attrs
+                ):
+                    multimodal_attrs["equation_latex"] = chunk_data.get(
+                        "equation_latex"
+                    )
         except Exception as e:
-            logger.debug(f"Failed to load multimodal metadata for `{entity_name}` from chunks: {e}")
+            logger.debug(
+                f"Failed to load multimodal metadata for `{entity_name}` from chunks: {e}"
+            )
 
     # 12. Update both graph and vector db
     node_data = dict(
@@ -2895,6 +2927,10 @@ async def extract_entities(
     # Ontology-driven extraction: Load ontology if available
     ontology_injection = ""
     relation_types = None
+    ontology_loaded = False
+    allowed_entity_types: set[str] | None = None
+    allowed_relation_types: set[str] | None = None
+    allowed_relation_type_compact_map: dict[str, str] = {}
     # IMPORTANT: global_config['kv_storage'] is a storage class name (str), not an instance.
     # Use llm_response_cache (a real BaseKVStorage instance) for ontology/project CRUD.
     kv_storage_instance = llm_response_cache
@@ -2905,7 +2941,11 @@ async def extract_entities(
     if not project_id and doc_status_storage and ordered_chunks:
         try:
             first_chunk = ordered_chunks[0][1]
-            doc_id = first_chunk.get("full_doc_id") if isinstance(first_chunk, dict) else None
+            doc_id = (
+                first_chunk.get("full_doc_id")
+                if isinstance(first_chunk, dict)
+                else None
+            )
             if doc_id:
                 doc_status = await doc_status_storage.get_by_id(doc_id)
                 doc_metadata = (doc_status or {}).get("metadata") or {}
@@ -2922,6 +2962,7 @@ async def extract_entities(
             effective_ontology_id = ontology_id
             if project_id and not ontology_id:
                 from lightrag.projects import ProjectManager
+
                 project_manager = ProjectManager(kv_storage_instance)
                 project = await project_manager.get(project_id)
                 if project:
@@ -2934,19 +2975,189 @@ async def extract_entities(
                     # Override entity_types and relation_types from ontology
                     entity_types = ontology.entity_types
                     relation_types = ontology.relation_types
+                    ontology_loaded = True
 
                     # Generate ontology injection text
                     ontology_injection = injector.inject_into_extraction_prompt(
-                        ontology,
-                        language=language
+                        ontology, language=language
                     )
-                    logger.info(f"Loaded ontology '{effective_ontology_id}' with {len(entity_types)} entity types and {len(relation_types)} relation types")
+                    logger.info(
+                        f"Loaded ontology '{effective_ontology_id}' with {len(entity_types)} entity types and {len(relation_types)} relation types"
+                    )
         except Exception as e:
             logger.warning(f"Failed to load ontology for extraction: {e}")
 
     # Set default relation_types if not provided by ontology
     if relation_types is None:
-        relation_types = ["related_to", "part_of", "located_in", "created_by", "belongs_to"]
+        relation_types = [
+            "related_to",
+            "part_of",
+            "located_in",
+            "created_by",
+            "belongs_to",
+        ]
+
+    def _normalize_entity_type(value: str) -> str:
+        return value.replace(" ", "").lower()
+
+    def _normalize_relation_type(value: str) -> str:
+        normalized = value.strip().lower().replace(" ", "_")
+        while "__" in normalized:
+            normalized = normalized.replace("__", "_")
+        return normalized
+
+    if ontology_loaded:
+        normalized_entity_types = {
+            _normalize_entity_type(entity_type)
+            for entity_type in entity_types
+            if entity_type and str(entity_type).strip()
+        }
+        allowed_entity_types = normalized_entity_types or None
+        normalized_relation_types = {
+            _normalize_relation_type(relation_type)
+            for relation_type in relation_types
+            if relation_type and str(relation_type).strip()
+        }
+        allowed_relation_types = normalized_relation_types or None
+        if allowed_relation_types:
+            allowed_relation_type_compact_map = {
+                relation_type.replace("_", ""): relation_type
+                for relation_type in allowed_relation_types
+            }
+
+    def _infer_relation_type(
+        relation_data: dict,
+        allowed_types: set[str] | None,
+    ) -> str:
+        if not allowed_types:
+            return ""
+        for field in ("relation_type", "keywords", "description"):
+            raw_value = relation_data.get(field, "")
+            normalized_value = (
+                _normalize_relation_type(str(raw_value)) if raw_value else ""
+            )
+            if not normalized_value:
+                continue
+            for allowed in allowed_types:
+                if allowed and allowed in normalized_value:
+                    return allowed
+            compact_value = normalized_value.replace("_", "")
+            if compact_value in allowed_relation_type_compact_map:
+                return allowed_relation_type_compact_map[compact_value]
+        return ""
+
+    def _filter_extracted_results(
+        nodes: dict,
+        edges: dict,
+    ) -> tuple[dict, dict]:
+        if not ontology_loaded:
+            return nodes, edges
+
+        filtered_nodes: dict = {}
+        if allowed_entity_types:
+            for entity_name, entries in nodes.items():
+                kept_entries = []
+                for entry in entries:
+                    entry_type = _normalize_entity_type(
+                        str(entry.get("entity_type", ""))
+                    )
+                    if entry_type in allowed_entity_types:
+                        kept_entries.append(entry)
+                if kept_entries:
+                    filtered_nodes[entity_name] = kept_entries
+        else:
+            filtered_nodes = nodes
+
+        filtered_edges: dict = {}
+        allowed_entities = set(filtered_nodes.keys())
+        if allowed_relation_types:
+            for edge_key, entries in edges.items():
+                src, tgt = edge_key
+                if src not in allowed_entities or tgt not in allowed_entities:
+                    continue
+                kept_entries = []
+                for entry in entries:
+                    relation_type = _normalize_relation_type(
+                        str(entry.get("relation_type", ""))
+                    )
+                    if relation_type and relation_type not in allowed_relation_types:
+                        compact_relation_type = relation_type.replace("_", "")
+                        if compact_relation_type in allowed_relation_type_compact_map:
+                            relation_type = allowed_relation_type_compact_map[
+                                compact_relation_type
+                            ]
+                            entry["relation_type"] = relation_type
+                        else:
+                            relation_type = ""
+                    if not relation_type:
+                        inferred = _infer_relation_type(entry, allowed_relation_types)
+                        if inferred:
+                            entry["relation_type"] = inferred
+                            relation_type = inferred
+                    if relation_type in allowed_relation_types:
+                        kept_entries.append(entry)
+                if kept_entries:
+                    filtered_edges[edge_key] = kept_entries
+        else:
+            for edge_key, entries in edges.items():
+                src, tgt = edge_key
+                if src in allowed_entities and tgt in allowed_entities:
+                    filtered_edges[edge_key] = entries
+
+        return filtered_nodes, filtered_edges
+
+    def _pick_multimodal_entity_type(modal_type: str) -> str | None:
+        if not ontology_loaded or not allowed_entity_types:
+            return modal_type or "multimodal"
+        modal_normalized = _normalize_entity_type(modal_type) if modal_type else ""
+        candidates = []
+        if modal_normalized:
+            candidates.append(modal_normalized)
+        candidates.extend(
+            [
+                "image",
+                "table",
+                "equation",
+                "figure",
+                "content",
+                "data",
+                "artifact",
+                "other",
+            ]
+        )
+        for candidate in candidates:
+            if candidate in allowed_entity_types:
+                return candidate
+        if "other" in allowed_entity_types:
+            return "other"
+        fallback_type = (
+            sorted(allowed_entity_types)[0] if allowed_entity_types else None
+        )
+        if fallback_type:
+            logger.warning(
+                "Multimodal type '%s' not in ontology types; fallback to '%s'",
+                modal_type,
+                fallback_type,
+            )
+            return fallback_type
+        return None
+
+    def _pick_multimodal_relation_type() -> str | None:
+        if not ontology_loaded or not allowed_relation_types:
+            return "related_to"
+        for candidate in [
+            "describes",
+            "depicts",
+            "references",
+            "related_to",
+            "part_of",
+            "located_in",
+            "belongs_to",
+            "created_by",
+        ]:
+            if candidate in allowed_relation_types:
+                return candidate
+        return None
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -3090,6 +3301,73 @@ async def extract_entities(
                 "entity_extraction",
             )
 
+        maybe_nodes, maybe_edges = _filter_extracted_results(maybe_nodes, maybe_edges)
+
+        if chunk_dp.get("is_multimodal"):
+            modal_type = chunk_dp.get("modal_type") or "multimodal"
+            multimodal_entity_type = _pick_multimodal_entity_type(modal_type)
+            if multimodal_entity_type:
+                asset_id = chunk_dp.get("asset_id")
+                multimodal_id_seed = asset_id or chunk_key
+                multimodal_entity_name = _truncate_entity_identifier(
+                    f"{modal_type}:{multimodal_id_seed}",
+                    DEFAULT_ENTITY_NAME_MAX_LENGTH,
+                    chunk_key,
+                    "Multimodal entity name",
+                )
+                multimodal_description = (
+                    chunk_dp.get("description")
+                    or chunk_dp.get("content")
+                    or f"{modal_type} content"
+                )
+                multimodal_meta = {
+                    "modal_type": chunk_dp.get("modal_type"),
+                    "asset_id": chunk_dp.get("asset_id"),
+                    "asset_path": chunk_dp.get("asset_path"),
+                    "table_html": chunk_dp.get("table_html"),
+                    "table_markdown": chunk_dp.get("table_markdown"),
+                    "equation_latex": chunk_dp.get("equation_latex"),
+                }
+                multimodal_meta = {
+                    key: value
+                    for key, value in multimodal_meta.items()
+                    if value is not None
+                }
+                maybe_nodes.setdefault(multimodal_entity_name, []).append(
+                    {
+                        "entity_name": multimodal_entity_name,
+                        "entity_type": multimodal_entity_type,
+                        "description": multimodal_description,
+                        "source_id": chunk_key,
+                        "file_path": file_path,
+                        "timestamp": timestamp,
+                        "multimodal_meta": multimodal_meta,
+                    }
+                )
+
+                relation_type = _pick_multimodal_relation_type()
+                if relation_type:
+                    for entity_name in maybe_nodes:
+                        if entity_name == multimodal_entity_name:
+                            continue
+                        relation_key = (multimodal_entity_name, entity_name)
+                        relation_description = (
+                            f"{modal_type} content related to {entity_name}"
+                        )
+                        maybe_edges.setdefault(relation_key, []).append(
+                            {
+                                "src_id": multimodal_entity_name,
+                                "tgt_id": entity_name,
+                                "weight": 1.0,
+                                "description": relation_description,
+                                "keywords": modal_type,
+                                "source_id": chunk_key,
+                                "file_path": file_path,
+                                "timestamp": timestamp,
+                                "relation_type": relation_type,
+                            }
+                        )
+
         processed_chunks += 1
         entities_count = len(maybe_nodes)
         relations_count = len(maybe_edges)
@@ -3111,8 +3389,10 @@ async def extract_entities(
                 "equation_latex": chunk_dp.get("equation_latex"),
             }
             # Remove None values
-            multimodal_meta = {k: v for k, v in multimodal_meta.items() if v is not None}
-            
+            multimodal_meta = {
+                k: v for k, v in multimodal_meta.items() if v is not None
+            }
+
             # Attach to each entity extracted from this chunk
             if multimodal_meta:
                 for entity_name in maybe_nodes:
@@ -3567,15 +3847,17 @@ async def _get_vector_context(
         # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
-        
+
         # Get chunk_ids filter from query_param
-        chunk_ids = getattr(query_param, 'chunk_ids', None)
+        chunk_ids = getattr(query_param, "chunk_ids", None)
 
         results = await chunks_vdb.query(
             query, top_k=search_top_k, query_embedding=query_embedding, ids=chunk_ids
         )
         if not results:
-            filter_info = f", filtered by {len(chunk_ids)} chunk_ids" if chunk_ids else ""
+            filter_info = (
+                f", filtered by {len(chunk_ids)} chunk_ids" if chunk_ids else ""
+            )
             logger.info(
                 f"Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold}{filter_info})"
             )
@@ -3761,10 +4043,10 @@ async def _perform_kg_search(
                 seen_relations.add(rel_key)
 
     # Filter by chunk_ids if provided (for project-level isolation)
-    chunk_ids = getattr(query_param, 'chunk_ids', None)
+    chunk_ids = getattr(query_param, "chunk_ids", None)
     if chunk_ids is not None and len(chunk_ids) > 0:
         chunk_ids_set = set(chunk_ids)
-        
+
         # Filter entities by source_id
         def entity_matches_chunks(entity: dict) -> bool:
             source_id = entity.get("source_id", "")
@@ -3772,27 +4054,33 @@ async def _perform_kg_search(
                 return False
             # source_id may contain multiple chunk IDs separated by GRAPH_FIELD_SEP
             from lightrag.constants import GRAPH_FIELD_SEP
-            entity_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
+
+            entity_chunk_ids = set(
+                cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip()
+            )
             return bool(entity_chunk_ids & chunk_ids_set)
-        
+
         filtered_entities = [e for e in final_entities if entity_matches_chunks(e)]
-        
+
         # Filter relations by source_id
         def relation_matches_chunks(relation: dict) -> bool:
             source_id = relation.get("source_id", "")
             if not source_id:
                 return False
             from lightrag.constants import GRAPH_FIELD_SEP
-            relation_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
+
+            relation_chunk_ids = set(
+                cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip()
+            )
             return bool(relation_chunk_ids & chunk_ids_set)
-        
+
         filtered_relations = [r for r in final_relations if relation_matches_chunks(r)]
-        
+
         logger.info(
             f"Project filtering: {len(final_entities)} -> {len(filtered_entities)} entities, "
             f"{len(final_relations)} -> {len(filtered_relations)} relations (by {len(chunk_ids)} chunk_ids)"
         )
-        
+
         final_entities = filtered_entities
         final_relations = filtered_relations
 
@@ -4281,9 +4569,7 @@ async def _build_context_str(
     )
     if "metadata" not in final_data:
         final_data["metadata"] = {}
-    include_llm_context = bool(
-        global_config.get("include_llm_context_str", False)
-    )
+    include_llm_context = bool(global_config.get("include_llm_context_str", False))
     final_data["metadata"]["llm_context_payload"] = {
         "entities": entities_context,
         "relationships": relations_context,
