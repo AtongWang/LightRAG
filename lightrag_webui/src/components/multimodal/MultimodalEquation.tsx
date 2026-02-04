@@ -4,6 +4,7 @@
  */
 
 import { useState, memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Calculator, Copy, Check, Maximize2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -33,6 +34,7 @@ export function MultimodalEquation({
   inline = false,
   showSource = false,
 }: MultimodalEquationProps) {
+  const { t } = useTranslation()
   const [isVisible, setIsVisible] = useState(false)
   const [copied, setCopied] = useState(false)
   const [showLatex, setShowLatex] = useState(showSource)
@@ -73,7 +75,7 @@ export function MultimodalEquation({
   const handleCopy = async () => {
     await navigator.clipboard.writeText(equationContent)
     setCopied(true)
-    toast.success('公式已复制')
+    toast.success(t('multimodal.equation.copySuccess'))
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -87,7 +89,7 @@ export function MultimodalEquation({
         )}
       >
         <Calculator className="w-6 h-6 text-gray-400 mr-2" />
-        <span className="text-gray-500">无公式内容</span>
+        <span className="text-gray-500">{t('multimodal.equation.noContent')}</span>
       </div>
     )
   }
@@ -101,7 +103,7 @@ export function MultimodalEquation({
             <InlineMath
               math={safeLatex}
               renderError={() => (
-                <span className="text-red-500 text-sm">公式渲染失败</span>
+                <span className="text-red-500 text-sm">{t('multimodal.equation.renderFailed')}</span>
               )}
             />
           </span>
@@ -131,7 +133,7 @@ export function MultimodalEquation({
         >
           <div className="text-center">
             <Calculator className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">点击查看公式内容</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('multimodal.equation.viewContent')}</p>
           </div>
         </div>
       </div>
@@ -156,9 +158,9 @@ export function MultimodalEquation({
               math={safeLatex}
               renderError={(error) => (
                 <div className="text-center">
-                  <p className="text-red-500 text-sm mb-1">公式渲染失败</p>
+                  <p className="text-red-500 text-sm mb-1">{t('multimodal.equation.renderFailed')}</p>
                   <code className="text-xs text-gray-500 break-all">{error.message}</code>
-                  <p className="text-xs text-gray-400 mt-2">LaTeX: {safeLatex.slice(0, 100)}...</p>
+                  <p className="text-xs text-gray-400 mt-2">{t('multimodal.equation.latexLabel')}: {safeLatex.slice(0, 100)}...</p>
                 </div>
               )}
             />
@@ -172,7 +174,7 @@ export function MultimodalEquation({
         {/* LaTeX源码（可选显示） */}
         {(showLatex || showSource) && safeLatex && (
           <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 p-3">
-            <div className="text-xs text-gray-500 mb-1">LaTeX 源码:</div>
+            <div className="text-xs text-gray-500 mb-1">{t('multimodal.equation.latexSource')}:</div>
             <code className="text-sm font-mono text-gray-700 dark:text-gray-300 break-all">
               {safeLatex}
             </code>
@@ -185,7 +187,7 @@ export function MultimodalEquation({
         <button
           className="p-1.5 bg-white/80 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md shadow-sm"
           onClick={handleCopy}
-          title="复制公式"
+          title={t('multimodal.equation.copyTitle')}
         >
           {copied ? (
             <Check className="w-4 h-4 text-green-500" />
@@ -202,7 +204,7 @@ export function MultimodalEquation({
                 : 'bg-white/80 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
             )}
             onClick={() => setShowLatex(!showLatex)}
-            title={showLatex ? '隐藏源码' : '显示源码'}
+            title={showLatex ? t('multimodal.equation.hideSource') : t('multimodal.equation.showSource')}
           >
             <span className="text-xs font-mono">TeX</span>
           </button>
@@ -210,7 +212,7 @@ export function MultimodalEquation({
         <button
           className="p-1.5 bg-white/80 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md shadow-sm"
           onClick={handleCollapse}
-          title="收起公式"
+          title={t('multimodal.equation.collapse')}
         >
           <Maximize2 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
         </button>

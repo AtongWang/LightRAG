@@ -17,6 +17,10 @@
     "themeToggle": {
       "switchToLight": "Switch to light theme",
       "switchToDark": "Switch to dark theme"
+    },
+    "languageToggle": {
+      "switchToEnglish": "Switch to English",
+      "switchToChinese": "Switch to Chinese"
     }
   },
   "login": {
@@ -35,6 +39,7 @@
   },
   "common": {
     "cancel": "Cancel",
+    "add": "Add",
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed"
@@ -308,20 +313,49 @@
       "lockStatus": "Lock Status",
       "threshold": "Threshold"
     },
+    "table": {
+      "id": "ID",
+      "labels": "Labels",
+      "entityType": "Type",
+      "degree": "Degree",
+      "description": "Description",
+      "multimodal": "Multimodal",
+      "relationType": "Type",
+      "source": "Source",
+      "target": "Target",
+      "title": "Node Table",
+      "relationTitle": "Relation Table",
+      "nodeCount": "{{count}} nodes",
+      "relationCount": "{{count}} relations",
+      "searchPlaceholder": "Search nodes...",
+      "searchRelationsPlaceholder": "Search relations...",
+      "allTypes": "All Types",
+      "noResults": "No results found",
+      "noData": "No data available",
+      "showing": "Showing {{count}} of {{total}} nodes",
+      "showingRelations": "Showing {{count}} of {{total}} relations",
+      "clickToSelect": "Click a row to select in graph"
+    },
     "propertiesView": {
       "editProperty": "Edit {{property}}",
       "editPropertyDescription": "Edit the property value in the text area below.",
       "errors": {
         "duplicateName": "Node name already exists",
+        "propertyRequired": "Property name and value are required",
+        "propertyExists": "Property already exists",
         "updateFailed": "Failed to update node",
         "tryAgainLater": "Please try again later",
         "updateSuccessButMergeFailed": "Properties updated, but merge failed: {{error}}",
-        "mergeFailed": "Merge failed: {{error}}"
+        "mergeFailed": "Merge failed: {{error}}",
+        "addPropertyFailed": "Failed to add property",
+        "aiEnrichmentFailed": "AI enrichment failed"
       },
       "success": {
         "entityUpdated": "Node updated successfully",
         "relationUpdated": "Relation updated successfully",
-        "entityMerged": "Nodes merged successfully"
+        "entityMerged": "Nodes merged successfully",
+        "propertyAdded": "Property added successfully",
+        "aiEnrichment": "AI enrichment completed"
       },
       "mergeOptionLabel": "Automatically merge when a duplicate name is found",
       "mergeOptionDescription": "If enabled, renaming to an existing name will merge this node into the existing one instead of failing.",
@@ -335,16 +369,24 @@
       },
       "node": {
         "title": "Node",
+        "basicInfo": "Basic Information",
         "id": "ID",
         "labels": "Labels",
         "degree": "Degree",
         "properties": "Properties",
         "relationships": "Relations(within subgraph)",
+        "image": "Image",
         "expandNode": "Expand Node",
         "pruneNode": "Prune Node",
         "deleteAllNodesError": "Refuse to delete all nodes in the graph",
         "nodesRemoved": "{{count}} nodes removed, including orphan nodes",
         "noNewNodes": "No expandable nodes found",
+        "addProperty": "Add Property",
+        "propertyNamePlaceholder": "Property name",
+        "propertyValuePlaceholder": "Property value",
+        "noProperties": "No properties",
+        "enriching": "Enriching...",
+        "aiEnrich": "AI Enrichment",
         "propertyNames": {
           "description": "Description",
           "entity_id": "Name",
@@ -352,7 +394,7 @@
           "source_id": "C-ID",
           "Neighbour": "Neigh",
           "file_path": "File",
-          "keywords": "Keys",
+          "keywords": "Keywords",
           "weight": "Weight"
         }
       },
@@ -378,6 +420,9 @@
       "refreshGlobalTooltip": "Refresh global graph data and reset search history",
       "refreshCurrentLabelTooltip": "Refresh current page graph data",
       "refreshingTooltip": "Refreshing data..."
+    },
+    "imageNode": {
+      "loadError": "Failed to load image"
     },
     "emptyGraph": "Empty(Try Reload Again)"
   },
@@ -452,6 +497,43 @@
       "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True."
     }
   },
+  "multimodal": {
+    "type": {
+      "image": "Image",
+      "table": "Table",
+      "equation": "Equation",
+      "attachment": "Attachment"
+    },
+    "source": "Source",
+    "relatedContent": "Related multimodal content:",
+    "noDescription": "No description",
+    "viewAll": "View all {{count}} multimodal items",
+    "image": {
+      "defaultAlt": "Multimodal image",
+      "notFound": "Image not found",
+      "noPermission": "No permission to access image",
+      "loadFailed": "Failed to load image",
+      "loadFailedWithStatus": "Load failed ({{status}})",
+      "networkError": "Network error"
+    },
+    "table": {
+      "copySuccess": "Table data copied",
+      "viewContent": "Click to view table content",
+      "noData": "No table data"
+    },
+    "equation": {
+      "copySuccess": "Equation copied",
+      "noContent": "No equation content",
+      "renderFailed": "Equation rendering failed",
+      "viewContent": "Click to view equation content",
+      "latexSource": "LaTeX source",
+      "latexLabel": "LaTeX",
+      "copyTitle": "Copy equation",
+      "hideSource": "Hide source",
+      "showSource": "Show source",
+      "collapse": "Collapse equation"
+    }
+  },
   "apiSite": {
     "loading": "Loading API Documentation..."
   },
@@ -460,6 +542,15 @@
     "description": "Please enter your API key to access the service",
     "placeholder": "Enter your API key",
     "save": "Save"
+  },
+  "project": {
+    "tabs": {
+      "documents": "Documents",
+      "ontology": "Ontology",
+      "graph": "Graph",
+      "table": "Table",
+      "chat": "Chat"
+    }
   },
   "pagination": {
     "showing": "Showing {{start}} to {{end}} of {{total}} entries",

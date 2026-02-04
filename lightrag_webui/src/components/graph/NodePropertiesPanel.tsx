@@ -162,6 +162,13 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
     }
   }
 
+  const getModalTypeLabel = (type: string) => {
+    if (type === 'image') return t('multimodal.type.image')
+    if (type === 'table') return t('multimodal.type.table')
+    if (type === 'equation') return t('multimodal.type.equation')
+    return t('multimodal.type.attachment')
+  }
+
   return (
     <div className="bg-background/90 rounded-lg border-2 p-4 backdrop-blur-lg max-w-md w-full max-h-[80vh] overflow-y-auto">
       {/* Header */}
@@ -209,9 +216,7 @@ const NodePropertiesPanel: React.FC<NodePropertiesPanelProps> = ({
               className="text-xs px-2 py-0.5 rounded-full text-white"
               style={{ backgroundColor: MULTIMODAL_COLORS[modalType] }}
             >
-              {modalType === 'image' ? '图片' :
-               modalType === 'table' ? '表格' :
-               modalType === 'equation' ? '公式' : modalType}
+              {getModalTypeLabel(modalType)}
             </span>
           </div>
           {modalType === 'image' && (assetId || assetPath) && (

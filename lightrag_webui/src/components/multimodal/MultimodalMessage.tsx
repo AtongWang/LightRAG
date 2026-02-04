@@ -4,6 +4,7 @@
  */
 
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -79,7 +80,15 @@ function MultimodalContentCard({
   item: MultimodalQueryResult | MultimodalChunkInfo
   compact?: boolean
 }) {
+  const { t } = useTranslation()
   const type = 'content_type' in item ? item.content_type : 'generic'
+
+  const getTypeLabel = (value: string) => {
+    if (value === 'image') return t('multimodal.type.image')
+    if (value === 'table') return t('multimodal.type.table')
+    if (value === 'equation') return t('multimodal.type.equation')
+    return t('multimodal.type.attachment')
+  }
   
   return (
     <div className={cn(
@@ -90,11 +99,11 @@ function MultimodalContentCard({
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <span className="text-lg">{MULTIMODAL_ICONS[type] || '📎'}</span>
         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {type === 'image' ? '图片' : type === 'table' ? '表格' : type === 'equation' ? '公式' : '附件'}
+          {getTypeLabel(type)}
         </span>
         {('source_file' in item && item.source_file) && (
           <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
-            来源: {item.source_file}
+            {t('multimodal.source')}: {item.source_file}
           </span>
         )}
       </div>
@@ -149,6 +158,7 @@ export function MultimodalMessage({
   isUser: _isUser = false,
   className,
 }: MultimodalMessageProps) {
+  const { t } = useTranslation()
   // 检测内容中是否有多模态引用
   const references = useMemo(() => extractMultimodalReferences(content), [content])
   
@@ -199,7 +209,7 @@ export function MultimodalMessage({
       {multimodalContent && multimodalContent.length > 0 && (
         <div className="space-y-2 mt-3">
           <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-            相关多模态内容:
+            {t('multimodal.relatedContent')}
           </div>
           {multimodalContent.map((item, index) => (
             <MultimodalContentCard
@@ -226,6 +236,7 @@ export function MultimodalPreview({
   maxItems?: number
   onViewAll?: () => void
 }) {
+  const { t } = useTranslation()
   const displayItems = items.slice(0, maxItems)
   const hasMore = items.length > maxItems
   
@@ -246,10 +257,16 @@ export function MultimodalPreview({
               <span className="text-xl">{MULTIMODAL_ICONS[type]}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">
-                  {type === 'image' ? '图片' : type === 'table' ? '表格' : type === 'equation' ? '公式' : '附件'}
+                  {type === 'image'
+                    ? t('multimodal.type.image')
+                    : type === 'table'
+                      ? t('multimodal.type.table')
+                      : type === 'equation'
+                        ? t('multimodal.type.equation')
+                        : t('multimodal.type.attachment')}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
-                  {item.description?.slice(0, 50) || '无描述'}
+                  {item.description?.slice(0, 50) || t('multimodal.noDescription')}
                 </div>
               </div>
             </div>
@@ -262,7 +279,7 @@ export function MultimodalPreview({
           onClick={onViewAll}
           className="text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400"
         >
-          查看全部 {items.length} 项多模态内容 →
+          {t('multimodal.viewAll', { count: items.length })} →
         </button>
       )}
     </div>

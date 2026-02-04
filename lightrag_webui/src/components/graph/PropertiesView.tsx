@@ -281,6 +281,13 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
     useGraphStore.getState().triggerNodePrune(node.id)
   }
 
+  const getModalTypeLabel = (type: string) => {
+    if (type === 'image') return t('multimodal.type.image')
+    if (type === 'table') return t('multimodal.type.table')
+    if (type === 'equation') return t('multimodal.type.equation')
+    return t('multimodal.type.attachment')
+  }
+
   // 渲染多模态内容预览
   const renderMultimodalPreview = () => {
     if (!isMultimodal || !modalType) return null
@@ -303,15 +310,13 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
       <div className="mb-3">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-lg">{MULTIMODAL_ICONS[modalType]}</span>
-          <span 
-            className="text-xs px-2 py-0.5 rounded-full text-white"
-            style={{ backgroundColor: MULTIMODAL_COLORS[modalType] }}
-          >
-            {modalType === 'image' ? '图片' : 
-             modalType === 'table' ? '表格' : 
-             modalType === 'equation' ? '公式' : modalType}
-          </span>
-        </div>
+            <span 
+              className="text-xs px-2 py-0.5 rounded-full text-white"
+              style={{ backgroundColor: MULTIMODAL_COLORS[modalType] }}
+            >
+            {getModalTypeLabel(modalType)}
+            </span>
+          </div>
         
         {/* 图片预览 */}
         {modalType === 'image' && (assetId || assetPath) && (

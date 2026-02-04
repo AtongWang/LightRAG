@@ -17,6 +17,10 @@
     "themeToggle": {
       "switchToLight": "切换到浅色主题",
       "switchToDark": "切换到深色主题"
+    },
+    "languageToggle": {
+      "switchToEnglish": "切换到英文",
+      "switchToChinese": "切换到中文"
     }
   },
   "login": {
@@ -35,6 +39,7 @@
   },
   "common": {
     "cancel": "取消",
+    "add": "添加",
     "save": "保存",
     "saving": "保存中...",
     "saveFailed": "保存失败"
@@ -308,20 +313,49 @@
       "lockStatus": "锁状态",
       "threshold": "阈值"
     },
+    "table": {
+      "id": "ID",
+      "labels": "标签",
+      "entityType": "类型",
+      "degree": "度数",
+      "description": "描述",
+      "multimodal": "多模态",
+      "relationType": "类型",
+      "source": "源节点",
+      "target": "目标节点",
+      "title": "节点表",
+      "relationTitle": "关系表",
+      "nodeCount": "{{count}} 个节点",
+      "relationCount": "{{count}} 条关系",
+      "searchPlaceholder": "搜索节点...",
+      "searchRelationsPlaceholder": "搜索关系...",
+      "allTypes": "全部类型",
+      "noResults": "未找到结果",
+      "noData": "暂无数据",
+      "showing": "显示 {{count}} / {{total}} 个节点",
+      "showingRelations": "显示 {{count}} / {{total}} 条关系",
+      "clickToSelect": "点击行以在图中选中"
+    },
     "propertiesView": {
       "editProperty": "编辑{{property}}",
       "editPropertyDescription": "在下方文本区域编辑属性值。",
       "errors": {
         "duplicateName": "节点名称已存在",
+        "propertyRequired": "属性名称和值不能为空",
+        "propertyExists": "属性已存在",
         "updateFailed": "更新节点失败",
         "tryAgainLater": "请稍后重试",
         "updateSuccessButMergeFailed": "属性已更新，但合并失败：{{error}}",
-        "mergeFailed": "合并失败：{{error}}"
+        "mergeFailed": "合并失败：{{error}}",
+        "addPropertyFailed": "添加属性失败",
+        "aiEnrichmentFailed": "AI 增强失败"
       },
       "success": {
         "entityUpdated": "节点更新成功",
         "relationUpdated": "关系更新成功",
-        "entityMerged": "节点合并成功"
+        "entityMerged": "节点合并成功",
+        "propertyAdded": "属性添加成功",
+        "aiEnrichment": "AI 增强完成"
       },
       "mergeOptionLabel": "重名时自动合并",
       "mergeOptionDescription": "勾选后，重命名为已存在的名称会将当前节点自动合并过去，而不会报错。",
@@ -335,16 +369,24 @@
       },
       "node": {
         "title": "节点",
+        "basicInfo": "基础信息",
         "id": "ID",
         "labels": "标签",
         "degree": "度数",
         "properties": "属性",
         "relationships": "关系(子图内)",
+        "image": "图片",
         "expandNode": "扩展节点",
         "pruneNode": "修剪节点",
         "deleteAllNodesError": "拒绝删除图中的所有节点",
         "nodesRemoved": "已删除 {{count}} 个节点，包括孤立节点",
         "noNewNodes": "没有发现可以扩展的节点",
+        "addProperty": "添加属性",
+        "propertyNamePlaceholder": "属性名称",
+        "propertyValuePlaceholder": "属性值",
+        "noProperties": "暂无属性",
+        "enriching": "增强中...",
+        "aiEnrich": "AI 增强",
         "propertyNames": {
           "description": "描述",
           "entity_id": "名称",
@@ -352,7 +394,7 @@
           "source_id": "C-ID",
           "Neighbour": "邻接",
           "file_path": "文件",
-          "keywords": "Keys",
+          "keywords": "关键词",
           "weight": "权重"
         }
       },
@@ -378,6 +420,9 @@
       "refreshGlobalTooltip": "刷新全图数据和重置搜索历史",
       "refreshCurrentLabelTooltip": "刷新当前页面图数据",
       "refreshingTooltip": "正在刷新数据..."
+    },
+    "imageNode": {
+      "loadError": "图片加载失败"
     },
     "emptyGraph": "无数据(请重载图形数据)"
   },
@@ -452,6 +497,43 @@
       "enableRerankTooltip": "为检索到的文本块启用重排。如果为True但未配置重排模型，将发出警告。默认为True。"
     }
   },
+  "multimodal": {
+    "type": {
+      "image": "图片",
+      "table": "表格",
+      "equation": "公式",
+      "attachment": "附件"
+    },
+    "source": "来源",
+    "relatedContent": "相关多模态内容:",
+    "noDescription": "无描述",
+    "viewAll": "查看全部 {{count}} 项多模态内容",
+    "image": {
+      "defaultAlt": "多模态图片",
+      "notFound": "图片不存在",
+      "noPermission": "无权限访问图片",
+      "loadFailed": "加载图片失败",
+      "loadFailedWithStatus": "加载失败 ({{status}})",
+      "networkError": "网络错误"
+    },
+    "table": {
+      "copySuccess": "表格数据已复制",
+      "viewContent": "点击查看表格内容",
+      "noData": "无表格数据"
+    },
+    "equation": {
+      "copySuccess": "公式已复制",
+      "noContent": "无公式内容",
+      "renderFailed": "公式渲染失败",
+      "viewContent": "点击查看公式内容",
+      "latexSource": "LaTeX 源码",
+      "latexLabel": "LaTeX",
+      "copyTitle": "复制公式",
+      "hideSource": "隐藏源码",
+      "showSource": "显示源码",
+      "collapse": "收起公式"
+    }
+  },
   "apiSite": {
     "loading": "正在加载 API 文档..."
   },
@@ -460,6 +542,15 @@
     "description": "请输入您的 API Key 以访问服务",
     "placeholder": "请输入 API Key",
     "save": "保存"
+  },
+  "project": {
+    "tabs": {
+      "documents": "文档",
+      "ontology": "本体",
+      "graph": "图谱",
+      "table": "表格",
+      "chat": "对话"
+    }
   },
   "pagination": {
     "showing": "显示第 {{start}} 到 {{end}} 条，共 {{total}} 条记录",

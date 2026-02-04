@@ -4,6 +4,7 @@
  */
 
 import { useState, useMemo, memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Table2, Copy, Check, Maximize2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -87,6 +88,7 @@ export function MultimodalTable({
   maxHeight = 400,
   zoomable = true,
 }: MultimodalTableProps) {
+  const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isZoomed, setIsZoomed] = useState(false)
@@ -129,7 +131,7 @@ export function MultimodalTable({
     if (textToCopy) {
       await navigator.clipboard.writeText(textToCopy)
       setCopied(true)
-      toast.success('表格数据已复制')
+      toast.success(t('multimodal.table.copySuccess'))
       setTimeout(() => setCopied(false), 2000)
     }
   }
@@ -149,7 +151,7 @@ export function MultimodalTable({
         <div className="text-center">
           <Table2 className="w-8 h-8 text-gray-400 mx-auto mb-2" />
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {label || '点击查看表格内容'}
+            {label || t('multimodal.table.viewContent')}
           </p>
         </div>
       </div>
@@ -240,7 +242,7 @@ export function MultimodalTable({
 
   // 渲染解析后的表格
   if (tableData.headers.length === 0) {
-    return renderTrigger('无表格数据')
+    return renderTrigger(t('multimodal.table.noData'))
   }
 
   return (

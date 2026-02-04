@@ -8,7 +8,7 @@ import { useSettingsStore } from '@/stores/settings'
  * Component that toggles the language between English and Chinese.
  */
 export default function LanguageToggle() {
-  const { i18n } = useTranslation()
+  const { i18n, t } = useTranslation()
   const currentLanguage = i18n.language
   const setLanguage = useSettingsStore.use.setLanguage()
 
@@ -27,7 +27,7 @@ export default function LanguageToggle() {
       <Button
         onClick={setEnglish}
         variant={controlButtonVariant}
-        tooltip="Switch to English"
+        tooltip={t('header.languageToggle.switchToEnglish')}
         size="icon"
         side="bottom"
       >
@@ -39,7 +39,7 @@ export default function LanguageToggle() {
     <Button
       onClick={setChinese}
       variant={controlButtonVariant}
-      tooltip="切换到中文"
+        tooltip={t('header.languageToggle.switchToChinese')}
       size="icon"
       side="bottom"
     >
