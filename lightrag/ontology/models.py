@@ -11,6 +11,7 @@ from datetime import datetime
 @dataclass
 class OntologySpec:
     """本体规格"""
+
     ontology_id: str
     project_id: str
     name: str
@@ -19,11 +20,8 @@ class OntologySpec:
     language: str
     entity_types: List[str]
     relation_types: List[str]
-    entity_attributes: Dict[str, Dict[str, Any]]
-    relation_attributes: Dict[str, Dict[str, Any]]
-    normalization_rules: Optional[Dict[str, Any]] = None
-    created_at: str = None
-    updated_at: str = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
     def __post_init__(self):
         if self.created_at is None:
@@ -38,17 +36,6 @@ class OntologySpec:
 @dataclass
 class ValidationResult:
     """验证结果"""
+
     is_valid: bool
     error_message: Optional[str] = None
-
-
-@dataclass
-class AttributeDefinition:
-    """属性定义"""
-    type: str
-    required: bool
-    desc: str
-    # 可选字段
-    enum_values: Optional[List[str]] = None
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None

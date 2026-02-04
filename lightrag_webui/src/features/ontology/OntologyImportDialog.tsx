@@ -34,19 +34,7 @@ const DEMO_TEMPLATES = [
       description: '适用于多领域的通用本体',
       language: 'zh',
       entity_types: ['Person', 'Organization', 'Location', 'Event', 'Concept', 'Product', 'Document', 'Time', 'Other'],
-      relation_types: ['关联', '属于', '位于', '参与', '创建', '包含', '影响', '发生于', 'Other'],
-      entity_attributes: {
-        Person: {
-          birth_date: { type: 'date', required: false, description: '出生日期' },
-          nationality: { type: 'string', required: false, description: '国籍' },
-          occupation: { type: 'string', required: false, description: '职业' }
-        },
-        Organization: {
-          type: { type: 'string', required: false, description: '组织类型', enum_values: ['公司', '政府', '非营利', '教育', '其他'] },
-          founded_date: { type: 'date', required: false, description: '成立日期' }
-        }
-      },
-      relation_attributes: {}
+      relation_types: ['关联', '属于', '位于', '参与', '创建', '包含', '影响', '发生于', 'Other']
     }
   },
   {
@@ -58,24 +46,7 @@ const DEMO_TEMPLATES = [
       description: '用于学术论文分析和引文网络构建',
       language: 'zh',
       entity_types: ['Author', 'Paper', 'Institution', 'Conference', 'Journal', 'Dataset', 'Method', 'Task', 'Other'],
-      relation_types: ['撰写', '引用', '使用', '属于', '提出', '评测', '发表于', '合作', 'Other'],
-      entity_attributes: {
-        Paper: {
-          title: { type: 'string', required: true, description: '论文标题' },
-          year: { type: 'number', required: false, description: '发表年份', min_value: 1900, max_value: 2100 },
-          doi: { type: 'string', required: false, description: 'DOI标识符' }
-        },
-        Author: {
-          affiliation: { type: 'string', required: false, description: '所属机构' },
-          orcid: { type: 'string', required: false, description: 'ORCID标识符' }
-        }
-      },
-      relation_attributes: {
-        引用: {
-          context: { type: 'string', required: false, description: '引用上下文' },
-          citation_type: { type: 'string', required: false, description: '引用类型', enum_values: ['背景', '方法', '对比', '扩展'] }
-        }
-      }
+      relation_types: ['撰写', '引用', '使用', '属于', '提出', '评测', '发表于', '合作', 'Other']
     }
   },
   {
@@ -87,24 +58,7 @@ const DEMO_TEMPLATES = [
       description: '用于企业关系分析、供应链和市场研究',
       language: 'zh',
       entity_types: ['Company', 'Person', 'Product', 'Industry', 'Location', 'Event', 'Patent', 'Brand', 'Other'],
-      relation_types: ['投资', '收购', '合作', '竞争', '供应', '任职', '创立', '生产', '位于', 'Other'],
-      entity_attributes: {
-        Company: {
-          founded_year: { type: 'number', required: false, description: '成立年份', min_value: 1800, max_value: 2100 },
-          industry: { type: 'string', required: false, description: '所属行业' },
-          stock_code: { type: 'string', required: false, description: '股票代码' }
-        },
-        Person: {
-          position: { type: 'string', required: false, description: '职位' },
-          nationality: { type: 'string', required: false, description: '国籍' }
-        }
-      },
-      relation_attributes: {
-        投资: {
-          amount: { type: 'string', required: false, description: '投资金额' },
-          round: { type: 'string', required: false, description: '融资轮次', enum_values: ['天使轮', 'A轮', 'B轮', 'C轮', 'D轮', 'IPO', '战略投资'] }
-        }
-      }
+      relation_types: ['投资', '收购', '合作', '竞争', '供应', '任职', '创立', '生产', '位于', 'Other']
     }
   },
   {
@@ -116,23 +70,7 @@ const DEMO_TEMPLATES = [
       description: '用于医疗健康领域的知识抽取和分析',
       language: 'zh',
       entity_types: ['Disease', 'Symptom', 'Drug', 'Treatment', 'Doctor', 'Hospital', 'BodyPart', 'MedicalTest', 'Other'],
-      relation_types: ['治疗', '引起', '表现为', '检查', '禁忌', '适用于', '属于', '就职于', 'Other'],
-      entity_attributes: {
-        Disease: {
-          icd_code: { type: 'string', required: false, description: 'ICD疾病编码' },
-          category: { type: 'string', required: false, description: '疾病分类' },
-          severity: { type: 'string', required: false, description: '严重程度', enum_values: ['轻度', '中度', '重度'] }
-        },
-        Drug: {
-          generic_name: { type: 'string', required: false, description: '通用名' },
-          dosage_form: { type: 'string', required: false, description: '剂型', enum_values: ['片剂', '胶囊', '注射液', '口服液', '外用'] }
-        }
-      },
-      relation_attributes: {
-        治疗: {
-          efficacy: { type: 'string', required: false, description: '疗效', enum_values: ['特效', '有效', '辅助'] }
-        }
-      }
+      relation_types: ['治疗', '引起', '表现为', '检查', '禁忌', '适用于', '属于', '就职于', 'Other']
     }
   }
 ]
@@ -321,9 +259,7 @@ export function OntologyImportDialog({
   "description": "描述",
   "language": "zh",
   "entity_types": ["Person", "Location", "Other"],
-  "relation_types": ["关联", "Other"],
-  "entity_attributes": {},
-  "relation_attributes": {}
+  "relation_types": ["关联", "Other"]
 }`}
                   value={jsonInput}
                   onChange={(e) => {

@@ -13,6 +13,7 @@ from ..base import BaseKVStorage, BaseGraphStorage
 
 class EnrichmentStatus(Enum):
     """丰富状态枚举"""
+
     PENDING = "pending"
     """待处理"""
     PROCESSING = "processing"
@@ -28,6 +29,7 @@ class EnrichmentStatus(Enum):
 @dataclass
 class EnrichmentConfig:
     """丰富配置"""
+
     batch_size: int = 10
     """每批处理的实体数量"""
 
@@ -50,6 +52,7 @@ class EnrichmentConfig:
 @dataclass
 class EnrichmentResult:
     """单个实体的丰富结果"""
+
     entity_name: str
     """实体名称"""
 
@@ -72,6 +75,7 @@ class EnrichmentResult:
 @dataclass
 class BatchEnrichmentResult:
     """批量丰富结果"""
+
     total_entities: int
     """总实体数"""
 
@@ -119,6 +123,7 @@ class EntityEnrichmentService:
 
         # 导入 Prompt 模块
         from . import prompts
+
         self.prompts = prompts
 
     async def enrich_entity(
@@ -142,6 +147,7 @@ class EntityEnrichmentService:
             EnrichmentResult: 丰富结果
         """
         import time
+
         start_time = time.time()
 
         result = EnrichmentResult(
@@ -164,7 +170,9 @@ class EntityEnrichmentService:
             if not custom_prompt and self._should_skip_enrichment(entity_data):
                 result.status = EnrichmentStatus.SKIPPED
                 result.enriched_data = entity_data
-                logger.debug(f"Skipping enrichment for entity '{entity_name}': already enriched")
+                logger.debug(
+                    f"Skipping enrichment for entity '{entity_name}': already enriched"
+                )
                 return result
 
             result.status = EnrichmentStatus.PROCESSING
@@ -173,6 +181,7 @@ class EntityEnrichmentService:
             ontology = None
             if self.config.use_ontology and ontology_id:
                 from ..ontology import OntologyService
+
                 ontology_service = OntologyService(self.kv_storage)
                 ontology = await ontology_service.get(ontology_id)
 
@@ -180,10 +189,16 @@ class EntityEnrichmentService:
             if custom_prompt:
                 # 使用自定义提示词，替换变量
                 enrichment_prompt = custom_prompt.replace("{entity_name}", entity_name)
-                enrichment_prompt = enrichment_prompt.replace("{entity_type}", entity_data.get("entity_type", "Unknown"))
-                enrichment_prompt = enrichment_prompt.replace("{description}", entity_data.get("description", ""))
+                enrichment_prompt = enrichment_prompt.replace(
+                    "{entity_type}", entity_data.get("entity_type", "Unknown")
+                )
+                enrichment_prompt = enrichment_prompt.replace(
+                    "{description}", entity_data.get("description", "")
+                )
                 if attribute_name:
-                    enrichment_prompt = enrichment_prompt.replace("{attribute_name}", attribute_name)
+                    enrichment_prompt = enrichment_prompt.replace(
+                        "{attribute_name}", attribute_name
+                    )
             else:
                 enrichment_prompt = self._build_enrichment_prompt(
                     entity_data, ontology, attribute_name
@@ -195,13 +210,12 @@ class EntityEnrichmentService:
                 # 如果有图片URL，添加到LLM调用参数中（视觉模型支持）
                 llm_kwargs["image_url"] = image_url
 
-            llm_response = await self.llm_model_func(
-                enrichment_prompt,
-                **llm_kwargs
-            )
+            llm_response = await self.llm_model_func(enrichment_prompt, **llm_kwargs)
 
             # 6. 解析响应
-            enriched_data = self._parse_enrichment_response(llm_response, attribute_name)
+            enriched_data = self._parse_enrichment_response(
+                llm_response, attribute_name
+            )
 
             # 7. 更新图存储
             await self._update_entity(entity_name, enriched_data)
@@ -209,7 +223,10 @@ class EntityEnrichmentService:
             result.enriched_data = enriched_data
             result.status = EnrichmentStatus.COMPLETED
 
-            logger.info(f"Successfully enriched entity '{entity_name}'" + (f" attribute '{attribute_name}'" if attribute_name else ""))
+            logger.info(
+                f"Successfully enriched entity '{entity_name}'"
+                + (f" attribute '{attribute_name}'" if attribute_name else "")
+            )
 
         except Exception as e:
             result.status = EnrichmentStatus.FAILED
@@ -236,6 +253,7 @@ class EntityEnrichmentService:
             BatchEnrichmentResult: 批量丰富结果
         """
         import time
+
         start_time = time.time()
 
         results = []
@@ -245,9 +263,11 @@ class EntityEnrichmentService:
 
         # 分批处理
         for i in range(0, len(entity_names), self.config.batch_size):
-            batch = entity_names[i:i + self.config.batch_size]
+            batch = entity_names[i : i + self.config.batch_size]
 
-            logger.info(f"Processing enrichment batch {i//self.config.batch_size + 1}, size: {len(batch)}")
+            logger.info(
+                f"Processing enrichment batch {i // self.config.batch_size + 1}, size: {len(batch)}"
+            )
 
             # 并发处理当前批次
             batch_results = await self._process_batch(batch, ontology_id)
@@ -290,7 +310,9 @@ class EntityEnrichmentService:
         # 获取所有指定类型的实体
         # 注意：这需要图存储支持按类型查询
         # 暂时返回空结果
-        logger.warning(f"enrich_by_entity_type not yet implemented for entity_type: {entity_type}")
+        logger.warning(
+            f"enrich_by_entity_type not yet implemented for entity_type: {entity_type}"
+        )
         return BatchEnrichmentResult(
             total_entities=0,
             succeeded=0,
@@ -314,10 +336,7 @@ class EntityEnrichmentService:
         """
         import asyncio
 
-        tasks = [
-            self.enrich_entity(name, ontology_id)
-            for name in entity_names
-        ]
+        tasks = [self.enrich_entity(name, ontology_id) for name in entity_names]
 
         return await asyncio.gather(*tasks)
 
@@ -380,13 +399,12 @@ class EntityEnrichmentService:
             context["attribute_name"] = attribute_name
             prompt_template = PROMPTS.get(
                 "entity_attribute_enrichment_prompt",
-                self.prompts.DEFAULT_ATTRIBUTE_ENRICHMENT_PROMPT
+                self.prompts.DEFAULT_ATTRIBUTE_ENRICHMENT_PROMPT,
             )
         else:
             # 使用通用丰富模板
             prompt_template = PROMPTS.get(
-                "entity_enrichment_prompt",
-                self.prompts.DEFAULT_ENRICHMENT_PROMPT
+                "entity_enrichment_prompt", self.prompts.DEFAULT_ENRICHMENT_PROMPT
             )
 
         return prompt_template.format(**context)
@@ -407,9 +425,9 @@ class EntityEnrichmentService:
         """
         lines = []
 
-        # 添加实体类型说明
-        if entity_type in ontology.entity_attributes:
-            attrs = ontology.entity_attributes[entity_type]
+        attrs_map = getattr(ontology, "entity_attributes", None)
+        if isinstance(attrs_map, dict) and entity_type in attrs_map:
+            attrs = attrs_map[entity_type]
             lines.append(f"Entity Type: {entity_type}")
             lines.append(f"Expected Attributes: {', '.join(attrs.keys())}")
 
@@ -423,9 +441,7 @@ class EntityEnrichmentService:
         return "\n".join(lines)
 
     def _parse_enrichment_response(
-        self,
-        response: str,
-        attribute_name: Optional[str] = None
+        self, response: str, attribute_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """解析 LLM 响应
 
@@ -466,7 +482,7 @@ class EntityEnrichmentService:
             if attribute_name:
                 return {
                     "description": "",
-                    "attributes": {attribute_name: response.strip()}
+                    "attributes": {attribute_name: response.strip()},
                 }
             # 返回原始响应作为描述
             return {"description": response, "attributes": {}}
@@ -499,7 +515,9 @@ class EntityEnrichmentService:
 
             if existing_desc:
                 # 选择更长的描述
-                updated_data["description"] = new_desc if len(new_desc) > len(existing_desc) else existing_desc
+                updated_data["description"] = (
+                    new_desc if len(new_desc) > len(existing_desc) else existing_desc
+                )
             else:
                 updated_data["description"] = new_desc
 
@@ -507,7 +525,7 @@ class EntityEnrichmentService:
         if "attributes" in enriched_data:
             updated_data["attributes"] = {
                 **updated_data.get("attributes", {}),
-                **enriched_data["attributes"]
+                **enriched_data["attributes"],
             }
 
         # 更新到图存储

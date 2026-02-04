@@ -13,11 +13,10 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { EntityTypeList } from './EntityTypeList'
 import { RelationTypeList } from './RelationTypeList'
-import { AttributeDefinitionForm } from './AttributeDefinitionForm'
 import { OntologyImportDialog } from './OntologyImportDialog'
 import { Save, CheckCircle2, AlertCircle, Download, Upload, Eye, Plus, Trash2 } from 'lucide-react'
 import { importOntology } from '@/api/ontology'
-import type { OntologySpec, AttributeDefinition } from '@/types/ontology'
+import type { OntologySpec } from '@/types/ontology'
 
 interface OntologyEditorProps {
   projectId: string
@@ -40,8 +39,6 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
   const [activeTab, setActiveTab] = useState<'entities' | 'relations'>('entities')
   const [hasChanges, setHasChanges] = useState(false)
-  const [editingAttributesFor, setEditingAttributesFor] = useState<string | null>(null)
-  const [editingAttributeType, setEditingAttributeType] = useState<'entity' | 'relation'>('entity')
   const [isValidating, setIsValidating] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -61,8 +58,6 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   useEffect(() => {
     setWorkingOntology(null)
     setHasChanges(false)
-    setEditingAttributesFor(null)
-    setEditingAttributeType('entity')
     setValidationResult(null)
     setCurrentOntology(null)
     fetchOntology(projectId)
@@ -82,9 +77,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
         name: workingOntology.name,
         description: workingOntology.description,
         entity_types: workingOntology.entity_types,
-        relation_types: workingOntology.relation_types,
-        entity_attributes: workingOntology.entity_attributes,
-        relation_attributes: workingOntology.relation_attributes
+        relation_types: workingOntology.relation_types
       })
       setHasChanges(false)
       setValidationResult({
@@ -186,10 +179,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       description: workingOntology.description,
       language: workingOntology.language,
       entity_types: workingOntology.entity_types,
-      relation_types: workingOntology.relation_types,
-      entity_attributes: workingOntology.entity_attributes,
-      relation_attributes: workingOntology.relation_attributes,
-      normalization_rules: workingOntology.normalization_rules
+      relation_types: workingOntology.relation_types
     }
     const dataStr = JSON.stringify(exportData, null, 2)
     const dataBlob = new Blob([dataStr], { type: 'application/json' })
@@ -217,16 +207,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       type === oldName ? newName : type
     )
 
-    const updatedEntityAttributes: Record<string, Record<string, AttributeDefinition>> = {}
-    Object.entries(workingOntology.entity_attributes).forEach(([key, value]) => {
-      const newKey = key === oldName ? newName : key
-      updatedEntityAttributes[newKey] = value
-    })
-
     setWorkingOntology({
       ...workingOntology,
-      entity_types: updatedEntityTypes,
-      entity_attributes: updatedEntityAttributes
+      entity_types: updatedEntityTypes
     })
     setHasChanges(true)
   }
@@ -234,13 +217,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   const handleDeleteEntityType = (name: string) => {
     if (!workingOntology) return
 
-    const newEntityAttributes = { ...workingOntology.entity_attributes }
-    delete newEntityAttributes[name]
-
     setWorkingOntology({
       ...workingOntology,
-      entity_types: workingOntology.entity_types.filter(type => type !== name),
-      entity_attributes: newEntityAttributes
+      entity_types: workingOntology.entity_types.filter(type => type !== name)
     })
     setHasChanges(true)
   }
@@ -261,16 +240,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       type === oldName ? newName : type
     )
 
-    const updatedRelationAttributes: Record<string, Record<string, AttributeDefinition>> = {}
-    Object.entries(workingOntology.relation_attributes).forEach(([key, value]) => {
-      const newKey = key === oldName ? newName : key
-      updatedRelationAttributes[newKey] = value
-    })
-
     setWorkingOntology({
       ...workingOntology,
-      relation_types: updatedRelationTypes,
-      relation_attributes: updatedRelationAttributes
+      relation_types: updatedRelationTypes
     })
     setHasChanges(true)
   }
@@ -278,39 +250,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   const handleDeleteRelationType = (name: string) => {
     if (!workingOntology) return
 
-    const newRelationAttributes = { ...workingOntology.relation_attributes }
-    delete newRelationAttributes[name]
-
     setWorkingOntology({
       ...workingOntology,
-      relation_types: workingOntology.relation_types.filter(type => type !== name),
-      relation_attributes: newRelationAttributes
-    })
-    setHasChanges(true)
-  }
-
-  const handleEditEntityAttributes = (entityType: string) => {
-    setEditingAttributesFor(entityType)
-    setEditingAttributeType('entity')
-  }
-
-  const handleEditRelationAttributes = (relationType: string) => {
-    setEditingAttributesFor(relationType)
-    setEditingAttributeType('relation')
-  }
-
-  const handleAttributesChange = (attributes: Record<string, AttributeDefinition>) => {
-    if (!workingOntology || !editingAttributesFor) return
-
-    // Use editingAttributeType to determine whether to update entity or relation attributes
-    const isEntityType = editingAttributeType === 'entity'
-
-    setWorkingOntology({
-      ...workingOntology,
-      ...(isEntityType
-        ? { entity_attributes: { ...workingOntology.entity_attributes, [editingAttributesFor]: attributes } }
-        : { relation_attributes: { ...workingOntology.relation_attributes, [editingAttributesFor]: attributes } }
-      )
+      relation_types: workingOntology.relation_types.filter(type => type !== name)
     })
     setHasChanges(true)
   }
@@ -326,9 +268,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
         language: 'zh',
         // Note: 'Other' is required by validator for fallback classification
         entity_types: ['Person', 'Organization', 'Location', 'Event', 'Concept', 'Other'],
-        relation_types: ['关联', '属于', '位于', '参与', '影响', 'Other'],
-        entity_attributes: {},
-        relation_attributes: {}
+        relation_types: ['关联', '属于', '位于', '参与', '影响', 'Other']
       })
       setWorkingOntology({ ...newOntology })
     } catch (error) {
@@ -434,41 +374,6 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     )
   }
 
-  if (editingAttributesFor) {
-    // Use editingAttributeType to determine whether editing entity or relation attributes
-    const isEntityType = editingAttributeType === 'entity'
-    const attributes = isEntityType
-      ? workingOntology.entity_attributes[editingAttributesFor] || {}
-      : workingOntology.relation_attributes[editingAttributesFor] || {}
-
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            编辑{isEntityType ? '实体' : '关系'}类型属性: {editingAttributesFor}
-          </CardTitle>
-          <CardDescription>
-            定义{isEntityType ? '实体' : '关系'}类型的属性结构
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AttributeDefinitionForm
-            initialData={attributes}
-            onChange={handleAttributesChange}
-          />
-          <div className="flex justify-end gap-3 mt-6">
-            <Button variant="outline" onClick={() => setEditingAttributesFor(null)}>
-              返回
-            </Button>
-            <Button onClick={() => setEditingAttributesFor(null)}>
-              完成
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <div className="space-y-6">
       {/* Import Dialog */}
@@ -568,17 +473,15 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
             <CardHeader>
               <CardTitle>实体类型管理</CardTitle>
               <CardDescription>
-                管理知识图谱中的实体类型及其属性定义
+                管理知识图谱中的实体类型
               </CardDescription>
             </CardHeader>
             <CardContent>
               <EntityTypeList
                 entityTypes={workingOntology.entity_types}
-                entityAttributes={workingOntology.entity_attributes}
                 onAdd={handleAddEntityType}
                 onEdit={handleEditEntityType}
                 onDelete={handleDeleteEntityType}
-                onEditAttributes={handleEditEntityAttributes}
               />
             </CardContent>
           </Card>
@@ -589,17 +492,15 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
             <CardHeader>
               <CardTitle>关系类型管理</CardTitle>
               <CardDescription>
-                管理知识图谱中的关系类型及其属性定义
+                管理知识图谱中的关系类型
               </CardDescription>
             </CardHeader>
             <CardContent>
               <RelationTypeList
                 relationTypes={workingOntology.relation_types}
-                relationAttributes={workingOntology.relation_attributes}
                 onAdd={handleAddRelationType}
                 onEdit={handleEditRelationType}
                 onDelete={handleDeleteRelationType}
-                onEditAttributes={handleEditRelationAttributes}
               />
             </CardContent>
           </Card>

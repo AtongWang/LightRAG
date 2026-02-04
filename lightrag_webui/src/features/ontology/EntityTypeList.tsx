@@ -4,36 +4,23 @@
  */
 
 import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
+import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Edit, Trash2, Plus, GripVertical } from 'lucide-react'
-import type { AttributeDefinition } from '@/types/ontology'
-
-interface EntityType {
-  name: string
-  description?: string
-  attributes: Record<string, AttributeDefinition>
-}
-
 interface EntityTypeListProps {
   entityTypes: string[]
-  entityAttributes: Record<string, Record<string, AttributeDefinition>>
   onAdd: (name: string) => void
   onEdit: (oldName: string, newName: string) => void
   onDelete: (name: string) => void
-  onEditAttributes?: (entityType: string) => void
   readonly?: boolean
 }
 
 export function EntityTypeList({
   entityTypes,
-  entityAttributes,
   onAdd,
   onEdit,
   onDelete,
-  onEditAttributes,
   readonly = false
 }: EntityTypeListProps) {
   const [newTypeName, setNewTypeName] = useState('')
@@ -63,10 +50,6 @@ export function EntityTypeList({
   const cancelEdit = () => {
     setEditingType(null)
     setEditName('')
-  }
-
-  const getAttributeCount = (typeName: string): number => {
-    return Object.keys(entityAttributes[typeName] || {}).length
   }
 
   return (
@@ -105,21 +88,9 @@ export function EntityTypeList({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-lg">{typeName}</h3>
-                      <Badge variant="secondary">
-                        {getAttributeCount(typeName)} 个属性
-                      </Badge>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {onEditAttributes && !readonly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onEditAttributes(typeName)}
-                        >
-                          编辑属性
-                        </Button>
-                      )}
                       {!readonly && (
                         <>
                           <Button

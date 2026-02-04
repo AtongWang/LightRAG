@@ -4,30 +4,23 @@
  */
 
 import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
+import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Edit, Trash2, Plus, GripVertical } from 'lucide-react'
-import type { AttributeDefinition } from '@/types/ontology'
-
 interface RelationTypeListProps {
   relationTypes: string[]
-  relationAttributes: Record<string, Record<string, AttributeDefinition>>
   onAdd: (name: string) => void
   onEdit: (oldName: string, newName: string) => void
   onDelete: (name: string) => void
-  onEditAttributes?: (relationType: string) => void
   readonly?: boolean
 }
 
 export function RelationTypeList({
   relationTypes,
-  relationAttributes,
   onAdd,
   onEdit,
   onDelete,
-  onEditAttributes,
   readonly = false
 }: RelationTypeListProps) {
   const [newTypeName, setNewTypeName] = useState('')
@@ -57,10 +50,6 @@ export function RelationTypeList({
   const cancelEdit = () => {
     setEditingType(null)
     setEditName('')
-  }
-
-  const getAttributeCount = (typeName: string): number => {
-    return Object.keys(relationAttributes[typeName] || {}).length
   }
 
   return (
@@ -99,21 +88,9 @@ export function RelationTypeList({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-lg">{typeName}</h3>
-                      <Badge variant="secondary">
-                        {getAttributeCount(typeName)} 个属性
-                      </Badge>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {onEditAttributes && !readonly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onEditAttributes(typeName)}
-                        >
-                          编辑属性
-                        </Button>
-                      )}
                       {!readonly && (
                         <>
                           <Button
