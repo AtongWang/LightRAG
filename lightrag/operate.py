@@ -1630,6 +1630,30 @@ async def _merge_nodes_then_upsert(
     already_file_paths = []
     already_multimodal_attrs = {}  # Store existing multimodal attributes
 
+    def _is_multimodal_entity() -> bool:
+        if any(dp.get("is_multimodal") for dp in nodes_data):
+            return True
+        multimodal_types = {
+            "image",
+            "table",
+            "equation",
+            "figure",
+            "chart",
+            "diagram",
+            "generic",
+            "multimodal",
+        }
+        for dp in nodes_data:
+            entity_type_value = str(dp.get("entity_type", "")).lower()
+            if entity_type_value in multimodal_types:
+                return True
+        entity_name_lower = str(entity_name).lower()
+        return entity_name_lower.startswith(
+            ("image:", "table:", "equation:", "figure:", "chart:", "diagram:")
+        )
+
+    is_multimodal_entity = _is_multimodal_entity()
+
     # 1. Get existing node data from knowledge graph
     already_node = await knowledge_graph_inst.get_node(entity_name)
     if already_node:
@@ -1637,17 +1661,18 @@ async def _merge_nodes_then_upsert(
         already_source_ids.extend(already_node["source_id"].split(GRAPH_FIELD_SEP))
         already_file_paths.extend(already_node["file_path"].split(GRAPH_FIELD_SEP))
         already_description.extend(already_node["description"].split(GRAPH_FIELD_SEP))
-        # Preserve existing multimodal attributes
-        for attr in [
-            "asset_path",
-            "asset_id",
-            "modal_type",
-            "table_html",
-            "table_markdown",
-            "equation_latex",
-        ]:
-            if already_node.get(attr):
-                already_multimodal_attrs[attr] = already_node[attr]
+        if is_multimodal_entity:
+            # Preserve existing multimodal attributes
+            for attr in [
+                "asset_path",
+                "asset_id",
+                "modal_type",
+                "table_html",
+                "table_markdown",
+                "equation_latex",
+            ]:
+                if already_node.get(attr):
+                    already_multimodal_attrs[attr] = already_node[attr]
 
     new_source_ids = [dp["source_id"] for dp in nodes_data if dp.get("source_id")]
 
@@ -1868,68 +1893,78 @@ async def _merge_nodes_then_upsert(
     # 11. Collect multimodal metadata from nodes_data
     # Prioritize: existing attrs > new attrs (keep first found for each type)
     multimodal_attrs = dict(already_multimodal_attrs)  # Start with existing attributes
-    for dp in nodes_data:
-        if "multimodal_meta" in dp and dp["multimodal_meta"]:
-            meta = dp["multimodal_meta"]
-            # Merge multimodal attributes (first occurrence wins for each type)
-            if meta.get("asset_path") and "asset_path" not in multimodal_attrs:
-                multimodal_attrs["asset_path"] = meta["asset_path"]
-            if meta.get("asset_id") and "asset_id" not in multimodal_attrs:
-                multimodal_attrs["asset_id"] = meta["asset_id"]
-            if meta.get("modal_type") and "modal_type" not in multimodal_attrs:
-                multimodal_attrs["modal_type"] = meta["modal_type"]
-            if meta.get("table_html") and "table_html" not in multimodal_attrs:
-                multimodal_attrs["table_html"] = meta["table_html"]
-            if meta.get("table_markdown") and "table_markdown" not in multimodal_attrs:
-                multimodal_attrs["table_markdown"] = meta["table_markdown"]
-            if meta.get("equation_latex") and "equation_latex" not in multimodal_attrs:
-                multimodal_attrs["equation_latex"] = meta["equation_latex"]
-
-    # 11.1 Fallback: gather multimodal metadata from chunk storage if still missing
-    if text_chunks_storage is not None and full_source_ids:
-        try:
-            chunk_data_list = await text_chunks_storage.get_by_ids(full_source_ids)
-            for chunk_data in chunk_data_list:
-                if not isinstance(chunk_data, dict):
-                    continue
-                if not chunk_data.get("is_multimodal"):
-                    continue
-                # Only fill missing keys (keep first occurrence)
+    if is_multimodal_entity:
+        for dp in nodes_data:
+            if "multimodal_meta" in dp and dp["multimodal_meta"]:
+                meta = dp["multimodal_meta"]
+                # Merge multimodal attributes (first occurrence wins for each type)
+                if meta.get("asset_path") and "asset_path" not in multimodal_attrs:
+                    multimodal_attrs["asset_path"] = meta["asset_path"]
+                if meta.get("asset_id") and "asset_id" not in multimodal_attrs:
+                    multimodal_attrs["asset_id"] = meta["asset_id"]
+                if meta.get("modal_type") and "modal_type" not in multimodal_attrs:
+                    multimodal_attrs["modal_type"] = meta["modal_type"]
+                if meta.get("table_html") and "table_html" not in multimodal_attrs:
+                    multimodal_attrs["table_html"] = meta["table_html"]
                 if (
-                    chunk_data.get("asset_path")
-                    and "asset_path" not in multimodal_attrs
-                ):
-                    multimodal_attrs["asset_path"] = chunk_data.get("asset_path")
-                if chunk_data.get("asset_id") and "asset_id" not in multimodal_attrs:
-                    multimodal_attrs["asset_id"] = chunk_data.get("asset_id")
-                if (
-                    chunk_data.get("modal_type")
-                    and "modal_type" not in multimodal_attrs
-                ):
-                    multimodal_attrs["modal_type"] = chunk_data.get("modal_type")
-                if (
-                    chunk_data.get("table_html")
-                    and "table_html" not in multimodal_attrs
-                ):
-                    multimodal_attrs["table_html"] = chunk_data.get("table_html")
-                if (
-                    chunk_data.get("table_markdown")
+                    meta.get("table_markdown")
                     and "table_markdown" not in multimodal_attrs
                 ):
-                    multimodal_attrs["table_markdown"] = chunk_data.get(
-                        "table_markdown"
-                    )
+                    multimodal_attrs["table_markdown"] = meta["table_markdown"]
                 if (
-                    chunk_data.get("equation_latex")
+                    meta.get("equation_latex")
                     and "equation_latex" not in multimodal_attrs
                 ):
-                    multimodal_attrs["equation_latex"] = chunk_data.get(
-                        "equation_latex"
-                    )
-        except Exception as e:
-            logger.debug(
-                f"Failed to load multimodal metadata for `{entity_name}` from chunks: {e}"
-            )
+                    multimodal_attrs["equation_latex"] = meta["equation_latex"]
+
+        # 11.1 Fallback: gather multimodal metadata from chunk storage if still missing
+        if text_chunks_storage is not None and full_source_ids:
+            try:
+                chunk_data_list = await text_chunks_storage.get_by_ids(full_source_ids)
+                for chunk_data in chunk_data_list:
+                    if not isinstance(chunk_data, dict):
+                        continue
+                    if not chunk_data.get("is_multimodal"):
+                        continue
+                    # Only fill missing keys (keep first occurrence)
+                    if (
+                        chunk_data.get("asset_path")
+                        and "asset_path" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["asset_path"] = chunk_data.get("asset_path")
+                    if (
+                        chunk_data.get("asset_id")
+                        and "asset_id" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["asset_id"] = chunk_data.get("asset_id")
+                    if (
+                        chunk_data.get("modal_type")
+                        and "modal_type" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["modal_type"] = chunk_data.get("modal_type")
+                    if (
+                        chunk_data.get("table_html")
+                        and "table_html" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["table_html"] = chunk_data.get("table_html")
+                    if (
+                        chunk_data.get("table_markdown")
+                        and "table_markdown" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["table_markdown"] = chunk_data.get(
+                            "table_markdown"
+                        )
+                    if (
+                        chunk_data.get("equation_latex")
+                        and "equation_latex" not in multimodal_attrs
+                    ):
+                        multimodal_attrs["equation_latex"] = chunk_data.get(
+                            "equation_latex"
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"Failed to load multimodal metadata for `{entity_name}` from chunks: {e}"
+                )
 
     # 12. Update both graph and vector db
     node_data = dict(
@@ -3106,58 +3141,32 @@ async def extract_entities(
 
         return filtered_nodes, filtered_edges
 
-    def _pick_multimodal_entity_type(modal_type: str) -> str | None:
-        if not ontology_loaded or not allowed_entity_types:
-            return modal_type or "multimodal"
-        modal_normalized = _normalize_entity_type(modal_type) if modal_type else ""
-        candidates = []
-        if modal_normalized:
-            candidates.append(modal_normalized)
-        candidates.extend(
-            [
-                "image",
-                "table",
-                "equation",
-                "figure",
-                "content",
-                "data",
-                "artifact",
-                "other",
-            ]
-        )
-        for candidate in candidates:
-            if candidate in allowed_entity_types:
-                return candidate
-        if "other" in allowed_entity_types:
-            return "other"
-        fallback_type = (
-            sorted(allowed_entity_types)[0] if allowed_entity_types else None
-        )
-        if fallback_type:
-            logger.warning(
-                "Multimodal type '%s' not in ontology types; fallback to '%s'",
-                modal_type,
-                fallback_type,
-            )
-            return fallback_type
-        return None
+    def _is_zh_language(language_value: str) -> bool:
+        return str(language_value).strip().lower().startswith("zh")
 
-    def _pick_multimodal_relation_type() -> str | None:
-        if not ontology_loaded or not allowed_relation_types:
-            return "related_to"
-        for candidate in [
-            "describes",
-            "depicts",
-            "references",
-            "related_to",
-            "part_of",
-            "located_in",
-            "belongs_to",
-            "created_by",
-        ]:
-            if candidate in allowed_relation_types:
-                return candidate
-        return None
+    def _normalize_multimodal_type(modal_type: str) -> str:
+        normalized = (modal_type or "").strip().lower()
+        if normalized in ("interline_equation", "equation_inline"):
+            normalized = "equation"
+        if normalized in ("figure", "chart", "diagram"):
+            normalized = "image"
+        if normalized not in ("image", "table", "equation"):
+            normalized = "generic"
+        if _is_zh_language(language):
+            if normalized == "image":
+                return "图像"
+            if normalized == "table":
+                return "表格"
+            if normalized == "equation":
+                return "公式"
+            return "附件"
+        return normalized
+
+    def _pick_multimodal_entity_type(modal_type: str) -> str:
+        return _normalize_multimodal_type(modal_type)
+
+    def _pick_multimodal_relation_type() -> str:
+        return "related_to"
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -3342,31 +3351,31 @@ async def extract_entities(
                         "file_path": file_path,
                         "timestamp": timestamp,
                         "multimodal_meta": multimodal_meta,
+                        "is_multimodal": True,
                     }
                 )
 
                 relation_type = _pick_multimodal_relation_type()
-                if relation_type:
-                    for entity_name in maybe_nodes:
-                        if entity_name == multimodal_entity_name:
-                            continue
-                        relation_key = (multimodal_entity_name, entity_name)
-                        relation_description = (
-                            f"{modal_type} content related to {entity_name}"
-                        )
-                        maybe_edges.setdefault(relation_key, []).append(
-                            {
-                                "src_id": multimodal_entity_name,
-                                "tgt_id": entity_name,
-                                "weight": 1.0,
-                                "description": relation_description,
-                                "keywords": modal_type,
-                                "source_id": chunk_key,
-                                "file_path": file_path,
-                                "timestamp": timestamp,
-                                "relation_type": relation_type,
-                            }
-                        )
+                for entity_name in maybe_nodes:
+                    if entity_name == multimodal_entity_name:
+                        continue
+                    relation_key = (multimodal_entity_name, entity_name)
+                    relation_description = (
+                        f"{modal_type} content related to {entity_name}"
+                    )
+                    maybe_edges.setdefault(relation_key, []).append(
+                        {
+                            "src_id": multimodal_entity_name,
+                            "tgt_id": entity_name,
+                            "weight": 1.0,
+                            "description": relation_description,
+                            "keywords": modal_type,
+                            "source_id": chunk_key,
+                            "file_path": file_path,
+                            "timestamp": timestamp,
+                            "relation_type": relation_type,
+                        }
+                    )
 
         processed_chunks += 1
         entities_count = len(maybe_nodes)
@@ -3377,27 +3386,6 @@ async def extract_entities(
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
-
-        # Attach multimodal metadata to entities if chunk has multimodal content
-        if chunk_dp.get("is_multimodal"):
-            multimodal_meta = {
-                "modal_type": chunk_dp.get("modal_type"),
-                "asset_id": chunk_dp.get("asset_id"),
-                "asset_path": chunk_dp.get("asset_path"),
-                "table_html": chunk_dp.get("table_html"),
-                "table_markdown": chunk_dp.get("table_markdown"),
-                "equation_latex": chunk_dp.get("equation_latex"),
-            }
-            # Remove None values
-            multimodal_meta = {
-                k: v for k, v in multimodal_meta.items() if v is not None
-            }
-
-            # Attach to each entity extracted from this chunk
-            if multimodal_meta:
-                for entity_name in maybe_nodes:
-                    for entity_data in maybe_nodes[entity_name]:
-                        entity_data["multimodal_meta"] = multimodal_meta
 
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
@@ -4374,6 +4362,48 @@ async def _merge_all_chunks(
     logger.info(
         f"Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})"
     )
+
+    # Enrich merged chunks with full metadata (including multimodal fields)
+    if merged_chunks and text_chunks_db:
+        try:
+            chunk_ids = [
+                chunk.get("chunk_id")
+                for chunk in merged_chunks
+                if chunk.get("chunk_id")
+            ]
+            if chunk_ids:
+                chunk_data_list = await text_chunks_db.get_by_ids(chunk_ids)
+                chunk_data_map = {}
+                for chunk_data in chunk_data_list:
+                    if not isinstance(chunk_data, dict):
+                        continue
+                    chunk_id = chunk_data.get("chunk_id") or chunk_data.get("id")
+                    if chunk_id:
+                        chunk_data_map[chunk_id] = chunk_data
+
+                for chunk in merged_chunks:
+                    chunk_id = chunk.get("chunk_id")
+                    if not chunk_id or chunk_id not in chunk_data_map:
+                        continue
+                    stored_chunk = chunk_data_map[chunk_id]
+                    for key in (
+                        "content",
+                        "file_path",
+                        "source_file",
+                        "page_idx",
+                        "description",
+                        "is_multimodal",
+                        "modal_type",
+                        "asset_id",
+                        "asset_path",
+                        "table_html",
+                        "table_markdown",
+                        "equation_latex",
+                    ):
+                        if key in stored_chunk and stored_chunk.get(key) is not None:
+                            chunk[key] = stored_chunk.get(key)
+        except Exception as e:
+            logger.debug(f"Failed to enrich merged chunks with metadata: {e}")
 
     return merged_chunks
 

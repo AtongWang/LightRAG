@@ -8,6 +8,7 @@ import { useBackendState, useAuthStore } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
 import { getAuthStatus } from '@/api/lightrag'
 import SiteHeader from '@/features/SiteHeader'
+import LanguageToggle from '@/components/LanguageToggle'
 import { InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
 import { ZapIcon } from 'lucide-react'
 
@@ -181,8 +182,8 @@ function App() {
               <div className="flex h-10 flex-1 items-center justify-center">
               </div>
 
-              {/* Empty right section to maintain layout */}
               <nav className="w-[200px] flex items-center justify-end">
+                <LanguageToggle />
               </nav>
             </header>
 

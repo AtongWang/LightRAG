@@ -35,6 +35,7 @@ def _ensure_string(value: Any) -> str:
 @dataclass
 class ParseResult:
     """解析结果数据类"""
+
     content: str
     """解析后的文本内容"""
 
@@ -107,8 +108,16 @@ class MultimodalParser:
             是否支持
         """
         supported_extensions = {
-            ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff",
-            ".docx", ".pptx", ".xlsx"
+            ".pdf",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".tiff",
+            ".docx",
+            ".pptx",
+            ".xlsx",
         }
         return Path(file_path).suffix.lower() in supported_extensions
 
@@ -125,7 +134,7 @@ class MultimodalParser:
 
         Returns:
             ParseResult: 解析结果
-            
+
         Raises:
             RuntimeError: 当服务不可用且文件是二进制格式时
         """
@@ -197,9 +206,7 @@ class MultimodalParser:
             # 已经是我们抛出的异常，直接传递
             raise
         except Exception as e:
-            logger.warning(
-                f"Failed to parse file {file_path} with RAGAnything: {e}"
-            )
+            logger.warning(f"Failed to parse file {file_path} with RAGAnything: {e}")
             # 尝试文本回退，但对二进制文件会失败
             try:
                 return await self._parse_text_only(file_path)
@@ -212,49 +219,72 @@ class MultimodalParser:
 
     def _is_binary_file(self, file_path: str) -> bool:
         """检测文件是否为二进制文件（不应作为文本读取）
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             是否为二进制文件
         """
         # 已知的二进制文件扩展名
         binary_extensions = {
-            ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif",
-            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            ".zip", ".tar", ".gz", ".rar", ".7z",
-            ".mp3", ".mp4", ".avi", ".mov", ".wav",
-            ".exe", ".dll", ".so", ".bin",
+            ".pdf",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".tiff",
+            ".tif",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".ppt",
+            ".pptx",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".rar",
+            ".7z",
+            ".mp3",
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".wav",
+            ".exe",
+            ".dll",
+            ".so",
+            ".bin",
         }
         ext = Path(file_path).suffix.lower()
         if ext in binary_extensions:
             return True
-        
+
         # 检查文件头部是否包含二进制数据
         try:
             with open(file_path, "rb") as f:
                 header = f.read(1024)
                 # 检查是否有null字节或其他二进制特征
-                if b'\x00' in header:
+                if b"\x00" in header:
                     return True
                 # 检查常见的二进制文件魔数
-                if header.startswith(b'%PDF'):  # PDF
+                if header.startswith(b"%PDF"):  # PDF
                     return True
-                if header.startswith(b'\x89PNG'):  # PNG
+                if header.startswith(b"\x89PNG"):  # PNG
                     return True
-                if header.startswith(b'\xff\xd8\xff'):  # JPEG
+                if header.startswith(b"\xff\xd8\xff"):  # JPEG
                     return True
-                if header.startswith(b'PK\x03\x04'):  # ZIP/DOCX/XLSX
+                if header.startswith(b"PK\x03\x04"):  # ZIP/DOCX/XLSX
                     return True
         except Exception:
             pass
-        
+
         return False
 
     async def _parse_text_only(self, file_path: str) -> ParseResult:
         """回退方案：仅读取文本内容
-        
+
         注意：此方法仅适用于纯文本文件（.txt, .md, .csv 等）。
         对于 PDF、图片等二进制文件，必须使用专门的解析器。
 
@@ -263,7 +293,7 @@ class MultimodalParser:
 
         Returns:
             ParseResult: 基础解析结果
-            
+
         Raises:
             ValueError: 如果文件是二进制文件（PDF、图片等）
         """
@@ -276,7 +306,7 @@ class MultimodalParser:
                 f"File type '{ext}' requires a specialized parser (e.g., MinerU API). "
                 f"Please ensure the multimodal parsing service is available and running."
             )
-        
+
         try:
             # 尝试 UTF-8 编码读取
             with open(file_path, "r", encoding="utf-8") as f:
@@ -354,6 +384,7 @@ class EnhancedMultimodalParser:
         llm_func: Optional[Callable] = None,
         vision_func: Optional[Callable] = None,
         asset_storage: Optional[Any] = None,
+        language: Optional[str] = None,
     ):
         """初始化增强多模态解析器
 
@@ -379,6 +410,7 @@ class EnhancedMultimodalParser:
         self.llm_func = llm_func
         self.vision_func = vision_func
         self.asset_storage = asset_storage
+        self.language = language
 
         self._pipeline: Optional[Any] = None
         self._legacy_parser: Optional[MultimodalParser] = None
@@ -398,6 +430,7 @@ class EnhancedMultimodalParser:
                 mineru_backend=self.mineru_backend,
                 output_dir=self.output_dir,
                 enable_multimodal=True,
+                language=self._normalize_pipeline_language(),
             )
 
             self._pipeline = DocumentPipeline(
@@ -412,6 +445,18 @@ class EnhancedMultimodalParser:
         except ImportError as e:
             logger.warning(f"New parser not available, using legacy: {e}")
             return None
+
+    def _normalize_pipeline_language(self) -> str:
+        if not self.language:
+            return "ch"
+        normalized = str(self.language).strip().lower()
+        if (
+            normalized.startswith("zh")
+            or normalized.startswith("ch")
+            or "chinese" in normalized
+        ):
+            return "ch"
+        return "en"
 
     def _get_legacy_parser(self) -> MultimodalParser:
         """获取旧版 RAGAnything 解析器"""
@@ -491,7 +536,7 @@ class EnhancedMultimodalParser:
 
         Returns:
             ParseResult: 解析结果
-            
+
         Raises:
             RuntimeError: 当所有解析器都失败且文件是二进制格式时
         """
@@ -499,7 +544,7 @@ class EnhancedMultimodalParser:
             return await self._parse_text_only(file_path)
 
         errors = []
-        
+
         # 尝试使用新管道
         pipeline = await self._get_pipeline()
         if pipeline:
@@ -523,7 +568,7 @@ class EnhancedMultimodalParser:
         except Exception as e:
             errors.append(f"Legacy parser failed: {e}")
             logger.warning(f"Legacy parser failed: {e}")
-        
+
         # 所有解析器都失败，尝试文本回退（会对二进制文件抛出异常）
         try:
             return await self._parse_text_only(file_path)

@@ -245,6 +245,9 @@ export function isMultimodalNode(node: { properties?: Record<string, unknown> })
   if (['image', 'table', 'figure', 'equation', 'chart', 'diagram'].includes(entityType)) {
     return true
   }
+  if (['图像', '图片', '表格', '公式', '附件'].includes(props.entity_type as string)) {
+    return true
+  }
   
   // 检查实体名称模式
   const entityName = (props.entity_name as string || props.id as string || '').toLowerCase()
@@ -268,6 +271,7 @@ export function getMultimodalNodeType(node: { properties?: Record<string, unknow
     : null
   const entityType = (props.entity_type as string || '').toLowerCase()
   const entityName = (props.entity_name as string || props.id as string || '').toLowerCase()
+  const rawEntityType = props.entity_type as string | undefined
   
   // 优先使用显式的多模态类型
   const explicitType = (props.modal_type || meta?.modal_type) as MultimodalType | undefined
@@ -292,6 +296,9 @@ export function getMultimodalNodeType(node: { properties?: Record<string, unknow
   if (entityType === 'table') return 'table'
   if (entityType === 'equation') return 'equation'
   if (entityType === 'chart' || entityType === 'diagram') return 'image'
+  if (rawEntityType === '图像' || rawEntityType === '图片') return 'image'
+  if (rawEntityType === '表格') return 'table'
+  if (rawEntityType === '公式') return 'equation'
   
   // 基于名称模式判断
   if (entityName.startsWith('figure_') || entityName.startsWith('image_')) return 'image'

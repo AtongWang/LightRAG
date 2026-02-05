@@ -32,38 +32,49 @@ def _ensure_string(value: Any) -> str:
     return str(value)
 
 
+def _is_chinese_language(language: Optional[str]) -> bool:
+    if not language:
+        return False
+    normalized = str(language).strip().lower()
+    return (
+        normalized.startswith("zh")
+        or normalized.startswith("ch")
+        or "chinese" in normalized
+    )
+
+
 @dataclass
 class ProcessedContent:
     """Result of processing a multimodal content item"""
-    
+
     # Original content block
     source_block: ContentBlock
-    
+
     # Generated description/caption
     description: str = ""
-    
+
     # Semantic entities extracted from description
     entities: List[str] = field(default_factory=list)
-    
+
     # Content for chunk insertion
     chunk_content: str = ""
-    
+
     # Asset information (for images)
     asset_id: Optional[str] = None
     asset_path: Optional[str] = None
-    
+
     # Structured data (for tables)
     table_html: Optional[str] = None
     table_markdown: Optional[str] = None
-    
+
     # LaTeX (for equations)
     equation_latex: Optional[str] = None
-    
+
     # Metadata
     content_type: str = "generic"
     page_idx: int = 0
     source_file: Optional[str] = None
-    
+
     def to_chunk_dict(self) -> Dict[str, Any]:
         """Convert to chunk dictionary for LightRAG insertion"""
         return {
@@ -84,16 +95,17 @@ class ProcessedContent:
 
 class BaseModalProcessor(ABC):
     """Base class for multimodal content processors"""
-    
+
     def __init__(
         self,
         llm_func: Optional[Callable] = None,
         vision_func: Optional[Callable] = None,
         asset_storage: Optional[Any] = None,
+        language: Optional[str] = None,
     ):
         """
         Initialize processor.
-        
+
         Args:
             llm_func: LLM function for text generation
             vision_func: Vision model function for image understanding
@@ -102,13 +114,14 @@ class BaseModalProcessor(ABC):
         self.llm_func = llm_func
         self.vision_func = vision_func
         self.asset_storage = asset_storage
-    
+        self.language = language
+
     @property
     @abstractmethod
     def content_type(self) -> str:
         """Return the content type this processor handles"""
         pass
-    
+
     @abstractmethod
     async def process(
         self,
@@ -118,12 +131,12 @@ class BaseModalProcessor(ABC):
     ) -> ProcessedContent:
         """
         Process a content block.
-        
+
         Args:
             block: Content block to process
             context: Surrounding text context
             source_file: Source document path
-            
+
         Returns:
             ProcessedContent with generated description
         """
@@ -132,7 +145,7 @@ class BaseModalProcessor(ABC):
 
 class ImageProcessor(BaseModalProcessor):
     """Processor for image content"""
-    
+
     # Prompt template for image description
     IMAGE_PROMPT = """Analyze this image from a document and provide a detailed description.
 Include:
@@ -146,10 +159,22 @@ Context from surrounding document text:
 
 Provide a clear, informative description that captures the key information in this image."""
 
+    IMAGE_PROMPT_ZH = """请分析文档中的图片并给出详细描述。
+包括：
+1. 图片展示的内容（图示、图表、照片等）
+2. 关键元素及其关系
+3. 可见的文字或标注
+4. 图片的主要用途或表达的信息
+
+周围文档上下文：
+{context}
+
+请用清晰、准确的中文描述图片关键信息。"""
+
     @property
     def content_type(self) -> str:
         return "image"
-    
+
     async def process(
         self,
         block: ContentBlock,
@@ -163,14 +188,19 @@ Provide a clear, informative description that captures the key information in th
             page_idx=block.page_idx,
             source_file=source_file,
         )
-        
+
         img_path = block.img_path
         if not img_path or not os.path.exists(img_path):
             logger.warning(f"Image file not found: {img_path}")
-            result.description = _ensure_string(block.img_caption or "Image (file not found)")
+            fallback = (
+                "图片（文件不存在）"
+                if _is_chinese_language(self.language)
+                else "Image (file not found)"
+            )
+            result.description = _ensure_string(block.img_caption or fallback)
             result.chunk_content = f"[Image: {result.description}]"
             return result
-        
+
         # Store asset if storage is available
         if self.asset_storage:
             try:
@@ -180,7 +210,7 @@ Provide a clear, informative description that captures the key information in th
                     content=content,
                     filename=os.path.basename(img_path),
                     modal_type="image",
-                    metadata={"source_file": source_file, "page_idx": block.page_idx}
+                    metadata={"source_file": source_file, "page_idx": block.page_idx},
                 )
                 result.asset_id = asset.asset_id
                 result.asset_path = img_path
@@ -189,35 +219,39 @@ Provide a clear, informative description that captures the key information in th
                 result.asset_path = img_path
         else:
             result.asset_path = img_path
-        
+
         # Generate description using vision model
         if self.vision_func:
             try:
-                description = await self._generate_description(
-                    img_path, context or ""
-                )
+                description = await self._generate_description(img_path, context or "")
                 result.description = _ensure_string(description)
             except Exception as e:
                 logger.warning(f"Failed to generate image description: {e}")
-                result.description = _ensure_string(block.img_caption or "Image from document")
+                fallback = (
+                    "文档中的图片"
+                    if _is_chinese_language(self.language)
+                    else "Image from document"
+                )
+                result.description = _ensure_string(block.img_caption or fallback)
         else:
-            result.description = _ensure_string(block.img_caption or "Image from document")
-        
+            fallback = (
+                "文档中的图片"
+                if _is_chinese_language(self.language)
+                else "Image from document"
+            )
+            result.description = _ensure_string(block.img_caption or fallback)
+
         # Create chunk content
         result.chunk_content = self._create_chunk_content(result)
-        
+
         return result
-    
-    async def _generate_description(
-        self,
-        img_path: str,
-        context: str
-    ) -> str:
+
+    async def _generate_description(self, img_path: str, context: str) -> str:
         """Generate description using vision model"""
         # Read and encode image
         with open(img_path, "rb") as f:
             img_data = base64.b64encode(f.read()).decode("utf-8")
-        
+
         # Determine mime type
         ext = os.path.splitext(img_path)[1].lower()
         mime_map = {
@@ -228,28 +262,37 @@ Provide a clear, informative description that captures the key information in th
             ".webp": "image/webp",
         }
         mime_type = mime_map.get(ext, "image/png")
-        
+
         # Build prompt
-        prompt = self.IMAGE_PROMPT.format(context=context[:500] if context else "No context available")
-        
+        prompt_template = (
+            self.IMAGE_PROMPT_ZH
+            if _is_chinese_language(self.language)
+            else self.IMAGE_PROMPT
+        )
+        prompt = prompt_template.format(
+            context=context[:500] if context else "No context available"
+        )
+
         # Call vision model
         # The vision_func should accept image data and prompt
         try:
             if asyncio.iscoroutinefunction(self.vision_func):
                 response = await self.vision_func(
-                    prompt,
-                    image_data=f"data:{mime_type};base64,{img_data}"
+                    prompt, image_data=f"data:{mime_type};base64,{img_data}"
                 )
             else:
                 response = self.vision_func(
-                    prompt,
-                    image_data=f"data:{mime_type};base64,{img_data}"
+                    prompt, image_data=f"data:{mime_type};base64,{img_data}"
                 )
             return response if isinstance(response, str) else str(response)
         except Exception as e:
             logger.error(f"Vision model error: {e}")
-            return "Image from document"
-    
+            return (
+                "文档中的图片"
+                if _is_chinese_language(self.language)
+                else "Image from document"
+            )
+
     def _create_chunk_content(self, result: ProcessedContent) -> str:
         """Create content string for chunk"""
         parts = [f"[Figure: {result.description}]"]
@@ -260,7 +303,7 @@ Provide a clear, informative description that captures the key information in th
 
 class TableProcessor(BaseModalProcessor):
     """Processor for table content"""
-    
+
     TABLE_PROMPT = """Analyze this table and provide a detailed description.
 Include:
 1. What the table shows (data comparison, statistics, etc.)
@@ -276,10 +319,25 @@ Context from surrounding document text:
 
 Provide a clear description that captures the key information in this table."""
 
+    TABLE_PROMPT_ZH = """请分析该表格并给出详细描述。
+包括：
+1. 表格展示的内容（对比、统计等）
+2. 列标题及其含义
+3. 关键数据点或趋势
+4. 表格的主要结论或洞察
+
+表格内容（HTML）：
+{table_html}
+
+周围文档上下文：
+{context}
+
+请用清晰、准确的中文描述表格关键信息。"""
+
     @property
     def content_type(self) -> str:
         return "table"
-    
+
     async def process(
         self,
         block: ContentBlock,
@@ -293,14 +351,16 @@ Provide a clear description that captures the key information in this table."""
             page_idx=block.page_idx,
             source_file=source_file,
         )
-        
+
         # Get table data
         table_html = block.table_html or block.raw_data.get("table_html", "")
         table_body = block.table_body or block.raw_data.get("table_body", "")
-        
+
         result.table_html = table_html
-        result.table_markdown = self._html_to_markdown(table_html) if table_html else table_body
-        
+        result.table_markdown = (
+            self._html_to_markdown(table_html) if table_html else table_body
+        )
+
         # Generate description
         if self.llm_func and table_html:
             try:
@@ -310,26 +370,37 @@ Provide a clear description that captures the key information in this table."""
                 result.description = _ensure_string(description)
             except Exception as e:
                 logger.warning(f"Failed to generate table description: {e}")
-                result.description = _ensure_string(block.table_caption or "Table from document")
+                fallback = (
+                    "文档中的表格"
+                    if _is_chinese_language(self.language)
+                    else "Table from document"
+                )
+                result.description = _ensure_string(block.table_caption or fallback)
         else:
-            result.description = _ensure_string(block.table_caption or "Table from document")
-        
+            fallback = (
+                "文档中的表格"
+                if _is_chinese_language(self.language)
+                else "Table from document"
+            )
+            result.description = _ensure_string(block.table_caption or fallback)
+
         # Create chunk content
         result.chunk_content = self._create_chunk_content(result)
-        
+
         return result
-    
-    async def _generate_description(
-        self,
-        table_html: str,
-        context: str
-    ) -> str:
+
+    async def _generate_description(self, table_html: str, context: str) -> str:
         """Generate description using LLM"""
-        prompt = self.TABLE_PROMPT.format(
-            table_html=table_html[:2000],  # Limit size
-            context=context[:500] if context else "No context available"
+        prompt_template = (
+            self.TABLE_PROMPT_ZH
+            if _is_chinese_language(self.language)
+            else self.TABLE_PROMPT
         )
-        
+        prompt = prompt_template.format(
+            table_html=table_html[:2000],
+            context=context[:500] if context else "No context available",
+        )
+
         try:
             if asyncio.iscoroutinefunction(self.llm_func):
                 response = await self.llm_func(prompt)
@@ -338,36 +409,40 @@ Provide a clear description that captures the key information in this table."""
             return response if isinstance(response, str) else str(response)
         except Exception as e:
             logger.error(f"LLM error: {e}")
-            return "Table from document"
-    
+            return (
+                "文档中的表格"
+                if _is_chinese_language(self.language)
+                else "Table from document"
+            )
+
     def _html_to_markdown(self, html: str) -> str:
         """Convert HTML table to markdown (simple conversion)"""
         try:
             # Simple conversion - could use a library for better results
             import re
-            
+
             # Remove tags except td, th, tr
-            text = re.sub(r'</?table[^>]*>', '', html)
-            text = re.sub(r'</?thead[^>]*>', '', text)
-            text = re.sub(r'</?tbody[^>]*>', '', text)
-            
+            text = re.sub(r"</?table[^>]*>", "", html)
+            text = re.sub(r"</?thead[^>]*>", "", text)
+            text = re.sub(r"</?tbody[^>]*>", "", text)
+
             # Convert rows
-            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', text, re.DOTALL)
+            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", text, re.DOTALL)
             md_rows = []
-            
+
             for i, row in enumerate(rows):
-                cells = re.findall(r'<t[hd][^>]*>(.*?)</t[hd]>', row, re.DOTALL)
-                cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+                cells = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.DOTALL)
+                cells = [re.sub(r"<[^>]+>", "", c).strip() for c in cells]
                 md_rows.append("| " + " | ".join(cells) + " |")
-                
+
                 # Add header separator after first row
                 if i == 0:
                     md_rows.append("|" + "|".join(["---"] * len(cells)) + "|")
-            
+
             return "\n".join(md_rows)
         except Exception:
             return html
-    
+
     def _create_chunk_content(self, result: ProcessedContent) -> str:
         """Create content string for chunk"""
         parts = [f"[Table: {result.description}]"]
@@ -380,7 +455,7 @@ Provide a clear description that captures the key information in this table."""
 
 class EquationProcessor(BaseModalProcessor):
     """Processor for equation/formula content"""
-    
+
     EQUATION_PROMPT = """Explain this mathematical equation/formula.
 Include:
 1. What the equation represents
@@ -396,10 +471,25 @@ Context from surrounding document text:
 
 Provide a clear explanation that helps understand this equation."""
 
+    EQUATION_PROMPT_ZH = """请解释这个数学公式。
+包括：
+1. 公式表示的含义
+2. 各变量/符号的含义
+3. 该公式的应用场景
+4. 重要性质或结论
+
+公式（LaTeX）：
+{latex}
+
+周围文档上下文：
+{context}
+
+请用清晰、准确的中文解释该公式。"""
+
     @property
     def content_type(self) -> str:
         return "equation"
-    
+
     async def process(
         self,
         block: ContentBlock,
@@ -413,11 +503,11 @@ Provide a clear explanation that helps understand this equation."""
             page_idx=block.page_idx,
             source_file=source_file,
         )
-        
+
         # Get equation data
         latex = block.equation_latex or block.text or ""
         result.equation_latex = latex
-        
+
         # Store equation image if available
         if block.equation_img_path and self.asset_storage:
             try:
@@ -428,42 +518,49 @@ Provide a clear explanation that helps understand this equation."""
                         content=content,
                         filename=os.path.basename(block.equation_img_path),
                         modal_type="equation",
-                        metadata={"latex": latex, "source_file": source_file}
+                        metadata={"latex": latex, "source_file": source_file},
                     )
                     result.asset_id = asset.asset_id
                     result.asset_path = block.equation_img_path
             except Exception as e:
                 logger.warning(f"Failed to store equation asset: {e}")
-        
+
         # Generate description
         if self.llm_func and latex:
             try:
-                description = await self._generate_description(
-                    latex, context or ""
-                )
+                description = await self._generate_description(latex, context or "")
                 result.description = _ensure_string(description)
             except Exception as e:
                 logger.warning(f"Failed to generate equation description: {e}")
-                result.description = f"Mathematical equation: {latex[:100]}"
+                fallback = (
+                    f"数学公式：{latex[:100]}"
+                    if _is_chinese_language(self.language)
+                    else f"Mathematical equation: {latex[:100]}"
+                )
+                result.description = fallback
         else:
-            result.description = f"Mathematical equation: {latex[:100]}"
-        
+            result.description = (
+                f"数学公式：{latex[:100]}"
+                if _is_chinese_language(self.language)
+                else f"Mathematical equation: {latex[:100]}"
+            )
+
         # Create chunk content
         result.chunk_content = self._create_chunk_content(result)
-        
+
         return result
-    
-    async def _generate_description(
-        self,
-        latex: str,
-        context: str
-    ) -> str:
+
+    async def _generate_description(self, latex: str, context: str) -> str:
         """Generate description using LLM"""
-        prompt = self.EQUATION_PROMPT.format(
-            latex=latex,
-            context=context[:500] if context else "No context available"
+        prompt_template = (
+            self.EQUATION_PROMPT_ZH
+            if _is_chinese_language(self.language)
+            else self.EQUATION_PROMPT
         )
-        
+        prompt = prompt_template.format(
+            latex=latex, context=context[:500] if context else "No context available"
+        )
+
         try:
             if asyncio.iscoroutinefunction(self.llm_func):
                 response = await self.llm_func(prompt)
@@ -472,8 +569,12 @@ Provide a clear explanation that helps understand this equation."""
             return response if isinstance(response, str) else str(response)
         except Exception as e:
             logger.error(f"LLM error: {e}")
-            return f"Mathematical equation: {latex[:100]}"
-    
+            return (
+                f"数学公式：{latex[:100]}"
+                if _is_chinese_language(self.language)
+                else f"Mathematical equation: {latex[:100]}"
+            )
+
     def _create_chunk_content(self, result: ProcessedContent) -> str:
         """Create content string for chunk"""
         parts = [f"[Equation: {result.description}]"]
@@ -486,16 +587,17 @@ class MultimodalProcessor:
     """
     Main multimodal processor that coordinates different content type processors.
     """
-    
+
     def __init__(
         self,
         llm_func: Optional[Callable] = None,
         vision_func: Optional[Callable] = None,
         asset_storage: Optional[Any] = None,
+        language: Optional[str] = None,
     ):
         """
         Initialize multimodal processor.
-        
+
         Args:
             llm_func: LLM function for text generation
             vision_func: Vision model function for image understanding
@@ -504,19 +606,28 @@ class MultimodalProcessor:
         self.llm_func = llm_func
         self.vision_func = vision_func or llm_func  # Use LLM as fallback
         self.asset_storage = asset_storage
-        
+        self.language = language
+
         # Initialize content type processors
         self.processors: Dict[str, BaseModalProcessor] = {
-            "image": ImageProcessor(llm_func, vision_func, asset_storage),
-            "table": TableProcessor(llm_func, vision_func, asset_storage),
-            "equation": EquationProcessor(llm_func, vision_func, asset_storage),
-            "interline_equation": EquationProcessor(llm_func, vision_func, asset_storage),
+            "image": ImageProcessor(
+                llm_func, vision_func, asset_storage, language=language
+            ),
+            "table": TableProcessor(
+                llm_func, vision_func, asset_storage, language=language
+            ),
+            "equation": EquationProcessor(
+                llm_func, vision_func, asset_storage, language=language
+            ),
+            "interline_equation": EquationProcessor(
+                llm_func, vision_func, asset_storage, language=language
+            ),
         }
-    
+
     def get_processor(self, content_type: str) -> Optional[BaseModalProcessor]:
         """Get processor for content type"""
         return self.processors.get(content_type)
-    
+
     async def process_block(
         self,
         block: ContentBlock,
@@ -525,24 +636,26 @@ class MultimodalProcessor:
     ) -> Optional[ProcessedContent]:
         """
         Process a single content block.
-        
+
         Args:
             block: Content block to process
             context: Surrounding text context
             source_file: Source document path
-            
+
         Returns:
             ProcessedContent or None if no processor available
         """
-        content_type = block.type.value if isinstance(block.type, ContentType) else str(block.type)
+        content_type = (
+            block.type.value if isinstance(block.type, ContentType) else str(block.type)
+        )
         processor = self.get_processor(content_type)
-        
+
         if processor is None:
             logger.debug(f"No processor for content type: {content_type}")
             return None
-        
+
         return await processor.process(block, context, source_file)
-    
+
     async def process_blocks(
         self,
         blocks: List[ContentBlock],
@@ -551,87 +664,91 @@ class MultimodalProcessor:
     ) -> List[ProcessedContent]:
         """
         Process multiple content blocks.
-        
+
         Args:
             blocks: List of content blocks to process
             context_map: Map of block index to context text
             source_file: Source document path
-            
+
         Returns:
             List of ProcessedContent objects
         """
         results = []
         context_map = context_map or {}
-        
+
         for i, block in enumerate(blocks):
-            content_type = block.type.value if isinstance(block.type, ContentType) else str(block.type)
-            
+            content_type = (
+                block.type.value
+                if isinstance(block.type, ContentType)
+                else str(block.type)
+            )
+
             # Skip text blocks
             if content_type in ("text", "title"):
                 continue
-            
+
             context = context_map.get(i, "")
-            
+
             try:
                 result = await self.process_block(block, context, source_file)
                 if result:
                     results.append(result)
             except Exception as e:
                 logger.error(f"Error processing block {i}: {e}")
-        
+
         return results
-    
+
     @staticmethod
     def extract_context_from_blocks(
-        blocks: List[ContentBlock],
-        target_idx: int,
-        window: int = 3
+        blocks: List[ContentBlock], target_idx: int, window: int = 3
     ) -> str:
         """
         Extract surrounding text context for a block.
-        
+
         Args:
             blocks: All content blocks
             target_idx: Index of target block
             window: Number of blocks before/after to include
-            
+
         Returns:
             Context string
         """
         context_parts = []
-        
+
         start_idx = max(0, target_idx - window)
         end_idx = min(len(blocks), target_idx + window + 1)
-        
+
         for i in range(start_idx, end_idx):
             if i == target_idx:
                 continue
             block = blocks[i]
             if block.type in (ContentType.TEXT, ContentType.TITLE) and block.text:
                 context_parts.append(block.text)
-        
+
         return " ".join(context_parts)
-    
+
     def build_context_map(
-        self,
-        blocks: List[ContentBlock],
-        window: int = 3
+        self, blocks: List[ContentBlock], window: int = 3
     ) -> Dict[int, str]:
         """
         Build context map for all multimodal blocks.
-        
+
         Args:
             blocks: All content blocks
             window: Context window size
-            
+
         Returns:
             Map of block index to context string
         """
         context_map = {}
-        
+
         for i, block in enumerate(blocks):
-            content_type = block.type.value if isinstance(block.type, ContentType) else str(block.type)
+            content_type = (
+                block.type.value
+                if isinstance(block.type, ContentType)
+                else str(block.type)
+            )
             if content_type not in ("text", "title"):
                 context_map[i] = self.extract_context_from_blocks(blocks, i, window)
-        
+
         return context_map

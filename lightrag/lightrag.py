@@ -473,17 +473,23 @@ class LightRAG:
     """Parser type: auto, mineru_api, mineru_local, raganything"""
 
     mineru_api_url: str = field(
-        default_factory=lambda: get_env_value("MINERU_API_URL", "http://localhost:8000", str)
+        default_factory=lambda: get_env_value(
+            "MINERU_API_URL", "http://localhost:8000", str
+        )
     )
     """MinerU Docker API service URL."""
 
     mineru_backend: str = field(
-        default_factory=lambda: get_env_value("MINERU_BACKEND", "hybrid-auto-engine", str)
+        default_factory=lambda: get_env_value(
+            "MINERU_BACKEND", "hybrid-auto-engine", str
+        )
     )
     """MinerU parsing backend: hybrid-auto-engine, pipeline, vlm-*"""
 
     multimodal_output_dir: str = field(
-        default_factory=lambda: get_env_value("MULTIMODAL_OUTPUT_DIR", "./parsed_docs", str)
+        default_factory=lambda: get_env_value(
+            "MULTIMODAL_OUTPUT_DIR", "./parsed_docs", str
+        )
     )
     """Output directory for parsed documents."""
 
@@ -493,24 +499,26 @@ class LightRAG:
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
     _multimodal_parser: Optional[Any] = field(default=None, init=False, repr=False)
     """Internal multimodal parser instance (created on first use)."""
-    _enhanced_multimodal_parser: Optional[Any] = field(default=None, init=False, repr=False)
+    _enhanced_multimodal_parser: Optional[Any] = field(
+        default=None, init=False, repr=False
+    )
     """Enhanced multimodal parser instance (created on first use)."""
 
     def _get_config_dict(self) -> dict:
         """Get a serializable config dictionary for passing to operate functions.
-        
+
         This avoids using asdict(self) which can fail with non-serializable objects
         like aiohttp sessions in the parser instances.
         """
         from dataclasses import fields as dataclass_fields
-        
+
         # Fields to skip (non-serializable or internal)
         skip_fields = {
-            '_multimodal_parser', 
-            '_enhanced_multimodal_parser',
-            '_storages_status',
+            "_multimodal_parser",
+            "_enhanced_multimodal_parser",
+            "_storages_status",
         }
-        
+
         config = {}
         for f in dataclass_fields(self):
             if f.name in skip_fields:
@@ -518,12 +526,14 @@ class LightRAG:
             try:
                 value = getattr(self, f.name)
                 # Skip if the value is a complex object that can't be easily serialized
-                if hasattr(value, '__dict__') and not isinstance(value, (dict, list, tuple, str, int, float, bool, type(None))):
+                if hasattr(value, "__dict__") and not isinstance(
+                    value, (dict, list, tuple, str, int, float, bool, type(None))
+                ):
                     # For callable/function objects, include them directly
                     if callable(value):
                         config[f.name] = value
                     # For dataclass objects, try to convert
-                    elif hasattr(value, '__dataclass_fields__'):
+                    elif hasattr(value, "__dataclass_fields__"):
                         try:
                             config[f.name] = asdict(value)
                         except Exception:
@@ -862,8 +872,10 @@ class LightRAG:
                 enabled=True,
                 output_dir=self.multimodal_output_dir,
                 llm_func=self.llm_model_func,
-                vision_func=self.vision_model_func or self.llm_model_func,  # Use vision model if available, fallback to LLM
+                vision_func=self.vision_model_func
+                or self.llm_model_func,  # Use vision model if available, fallback to LLM
                 asset_storage=asset_storage,
+                language=self.addon_params.get("language", DEFAULT_SUMMARY_LANGUAGE),
             )
             logger.debug(
                 f"Created enhanced multimodal parser (type={self.multimodal_parser_type})"
@@ -1413,7 +1425,9 @@ class LightRAG:
         # Get the enhanced parser
         parser = self._get_enhanced_multimodal_parser()
         if parser is None:
-            logger.warning("Multimodal parsing not enabled, falling back to text insert")
+            logger.warning(
+                "Multimodal parsing not enabled, falling back to text insert"
+            )
             # Read files as text and insert
             texts = []
             for fp in file_paths:
@@ -1423,11 +1437,14 @@ class LightRAG:
                 except Exception as e:
                     logger.error(f"Failed to read {fp}: {e}")
             if texts:
-                return await self.ainsert(texts, file_paths=file_paths, track_id=track_id)
+                return await self.ainsert(
+                    texts, file_paths=file_paths, track_id=track_id
+                )
             return track_id
 
         # Prepare document status tracking
         from pathlib import Path
+
         doc_statuses: dict[str, dict[str, Any]] = {}
 
         def _compute_file_md5(file_path: str) -> str:
@@ -1454,7 +1471,10 @@ class LightRAG:
                 existing_doc = await self.doc_status.get_by_id(doc_id)
                 if existing_doc:
                     existing_status = existing_doc.get("status")
-                    if existing_status not in (DocStatus.FAILED, DocStatus.FAILED.value):
+                    if existing_status not in (
+                        DocStatus.FAILED,
+                        DocStatus.FAILED.value,
+                    ):
                         logger.info(
                             f"Document already exists (status={existing_status}), skipping: {display_file_name}"
                         )
@@ -1476,7 +1496,9 @@ class LightRAG:
 
                 # Update status to PROCESSING
                 doc_statuses[doc_id]["status"] = DocStatus.PROCESSING
-                doc_statuses[doc_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+                doc_statuses[doc_id]["updated_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
 
                 # Persist status to storage (so frontend can see it)
                 await self.doc_status.upsert(doc_statuses)
@@ -1486,8 +1508,7 @@ class LightRAG:
                     # Parse document
                     logger.info(f"Parsing multimodal document: {file_path}")
                     parse_result = await parser.parse(
-                        file_path,
-                        enable_multimodal=enable_multimodal_processing
+                        file_path, enable_multimodal=enable_multimodal_processing
                     )
 
                     # Process parsed content
@@ -1503,6 +1524,7 @@ class LightRAG:
                 except Exception as e:
                     logger.error(f"Failed to process {file_path}: {e}")
                     import traceback
+
                     traceback.print_exc()
 
                     # Update status to FAILED
@@ -1571,7 +1593,9 @@ class LightRAG:
             existing_doc_status = await self.doc_status.get_by_id(doc_key)
             if existing_doc_status:
                 existing_doc_status["status"] = DocStatus.PROCESSED
-                existing_doc_status["updated_at"] = datetime.now(timezone.utc).isoformat()
+                existing_doc_status["updated_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
                 await self.doc_status.upsert({doc_key: existing_doc_status})
             return
 
@@ -1613,8 +1637,8 @@ class LightRAG:
                         continue
 
                     chunk_key = compute_mdhash_id(
-                        f"{file_name}:{block.get('modal_type', 'unknown')}:{i}",
-                        prefix="chunk-"
+                        f"{doc_key}:{block.get('modal_type', 'unknown')}:{i}",
+                        prefix="chunk-",
                     )
                     tokens = len(self.tokenizer.encode(chunk_content))
 
@@ -1641,7 +1665,9 @@ class LightRAG:
         # Filter already existing chunks
         chunk_keys = set(inserting_chunks.keys())
         add_chunk_keys = await self.text_chunks.filter_keys(chunk_keys)
-        inserting_chunks = {k: v for k, v in inserting_chunks.items() if k in add_chunk_keys}
+        inserting_chunks = {
+            k: v for k, v in inserting_chunks.items() if k in add_chunk_keys
+        }
 
         if not inserting_chunks:
             logger.info(f"All chunks from {file_name} already exist")
@@ -1664,7 +1690,7 @@ class LightRAG:
         if chunk_results:
             from lightrag.operate import merge_nodes_and_edges
             import asyncio as _asyncio
-            
+
             # Create a simple pipeline status for merge_nodes_and_edges
             _pipeline_status = {
                 "latest_message": "",
@@ -1672,7 +1698,7 @@ class LightRAG:
                 "cancellation_requested": False,
             }
             _pipeline_status_lock = _asyncio.Lock()
-            
+
             await merge_nodes_and_edges(
                 chunk_results=chunk_results,
                 knowledge_graph_inst=self.chunk_entity_relation_graph,
@@ -1705,7 +1731,9 @@ class LightRAG:
                 "status": DocStatus.PROCESSED,
                 "chunks_count": len(inserting_chunks),
                 "chunks_list": list(inserting_chunks.keys()),
-                "content_summary": parse_result.content[:500] + "..." if len(parse_result.content) > 500 else parse_result.content,
+                "content_summary": parse_result.content[:500] + "..."
+                if len(parse_result.content) > 500
+                else parse_result.content,
                 "content_length": len(parse_result.content),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -2124,7 +2152,16 @@ class LightRAG:
                         "track_id": getattr(status_doc, "track_id", ""),
                         # Clear any error messages but preserve project_id and other metadata
                         "error_msg": "",
-                        "metadata": {k: v for k, v in existing_metadata.items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
+                        "metadata": {
+                            k: v
+                            for k, v in existing_metadata.items()
+                            if k
+                            not in [
+                                "processing_start_time",
+                                "processing_end_time",
+                                "error_type",
+                            ]
+                        },
                     }
 
                     # Update the status in to_process_docs as well
@@ -2411,8 +2448,26 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
-                                                **({k: v for k, v in (getattr(status_doc, "metadata", {}) or {}).items() if k not in ["processing_start_time", "processing_end_time", "error_type"]}),
-                                                "processing_start_time": processing_start_time
+                                                **(
+                                                    {
+                                                        k: v
+                                                        for k, v in (
+                                                            getattr(
+                                                                status_doc,
+                                                                "metadata",
+                                                                {},
+                                                            )
+                                                            or {}
+                                                        ).items()
+                                                        if k
+                                                        not in [
+                                                            "processing_start_time",
+                                                            "processing_end_time",
+                                                            "error_type",
+                                                        ]
+                                                    }
+                                                ),
+                                                "processing_start_time": processing_start_time,
                                             },
                                         }
                                     }
@@ -2492,7 +2547,9 @@ class LightRAG:
 
                             # Update document status to failed
                             # Preserve original metadata (e.g., project_id)
-                            existing_metadata = getattr(status_doc, "metadata", {}) or {}
+                            existing_metadata = (
+                                getattr(status_doc, "metadata", {}) or {}
+                            )
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -2507,7 +2564,16 @@ class LightRAG:
                                         "file_path": file_path,
                                         "track_id": status_doc.track_id,  # Preserve existing track_id
                                         "metadata": {
-                                            **{k: v for k, v in existing_metadata.items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
+                                            **{
+                                                k: v
+                                                for k, v in existing_metadata.items()
+                                                if k
+                                                not in [
+                                                    "processing_start_time",
+                                                    "processing_end_time",
+                                                    "error_type",
+                                                ]
+                                            },
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
                                         },
@@ -2566,7 +2632,21 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
-                                                **{k: v for k, v in (getattr(status_doc, "metadata", {}) or {}).items() if k not in ["processing_start_time", "processing_end_time", "error_type"]},
+                                                **{
+                                                    k: v
+                                                    for k, v in (
+                                                        getattr(
+                                                            status_doc, "metadata", {}
+                                                        )
+                                                        or {}
+                                                    ).items()
+                                                    if k
+                                                    not in [
+                                                        "processing_start_time",
+                                                        "processing_end_time",
+                                                        "error_type",
+                                                    ]
+                                                },
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
                                             },
@@ -4624,6 +4704,7 @@ class LightRAG:
 
         # Apply priority wrapper
         from functools import partial
+
         llm_func = partial(llm_func, _priority=8)
 
         # Create enrichment service
@@ -4633,7 +4714,7 @@ class LightRAG:
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")
-            )
+            ),
         )
 
         # Perform enrichment
@@ -4641,7 +4722,7 @@ class LightRAG:
             entity_name=entity_name,
             ontology_id=ontology_id,
             attribute_name=attribute_name,
-            custom_prompt=prompt
+            custom_prompt=prompt,
         )
 
         # Return as dict for JSON serialization
@@ -4690,6 +4771,7 @@ class LightRAG:
 
         # Apply priority wrapper
         from functools import partial
+
         llm_func = partial(llm_func, _priority=8)
 
         # Create enrichment service
@@ -4699,7 +4781,7 @@ class LightRAG:
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")
-            )
+            ),
         )
 
         # Perform enrichment with vision support
@@ -4708,7 +4790,7 @@ class LightRAG:
             ontology_id=ontology_id,
             attribute_name=attribute_name,
             custom_prompt=prompt,
-            image_url=image_url
+            image_url=image_url,
         )
 
         # Return as dict for JSON serialization
@@ -4736,9 +4818,7 @@ class LightRAG:
             Dict containing enrichment result
         """
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(
-            self.aenrich_entity(entity_name, ontology_id)
-        )
+        return loop.run_until_complete(self.aenrich_entity(entity_name, ontology_id))
 
     async def aenrich_entities(
         self,
@@ -4774,13 +4854,12 @@ class LightRAG:
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")
-            )
+            ),
         )
 
         # Perform batch enrichment
         batch_result = await enrichment_service.enrich_entities(
-            entity_names=entity_names,
-            ontology_id=ontology_id
+            entity_names=entity_names, ontology_id=ontology_id
         )
 
         # Convert results to dicts
@@ -4820,6 +4899,4 @@ class LightRAG:
             Dict containing batch enrichment result
         """
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(
-            self.aenrich_entities(entity_names, ontology_id)
-        )
+        return loop.run_until_complete(self.aenrich_entities(entity_names, ontology_id))

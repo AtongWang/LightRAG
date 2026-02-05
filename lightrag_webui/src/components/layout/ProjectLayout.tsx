@@ -4,6 +4,7 @@
  */
 
 import { Outlet, useParams, Link, useLocation } from 'react-router-dom'
+import LanguageToggle from '@/components/LanguageToggle'
 import { useProjectStore } from '@/stores/project'
 import { useEffect, useState } from 'react'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -327,6 +328,10 @@ function ProjectHeader({ project, coverImage }: { project: Project; coverImage?:
                 </span>
               ))}
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto">
+            <LanguageToggle />
           </div>
 
         </div>
