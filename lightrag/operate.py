@@ -4359,6 +4359,52 @@ async def _merge_all_chunks(
                     }
                 )
 
+    # Ensure multimodal entity chunks are included even if not in top-k chunks
+    if filtered_entities:
+        multimodal_chunk_ids = []
+        for entity in filtered_entities:
+            source_id = entity.get("source_id")
+            if not source_id:
+                continue
+            entity_type_value = str(entity.get("entity_type", "")).lower()
+            if entity.get("is_multimodal") or entity.get("multimodal_meta"):
+                multimodal_chunk_ids.append(str(source_id))
+                continue
+            if entity_type_value in {
+                "image",
+                "table",
+                "equation",
+                "figure",
+                "chart",
+                "diagram",
+                "generic",
+                "multimodal",
+                "图像",
+                "图片",
+                "表格",
+                "公式",
+                "附件",
+            }:
+                multimodal_chunk_ids.append(str(source_id))
+
+        for chunk_id in multimodal_chunk_ids:
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+            merged_chunks.append(
+                {
+                    "content": "",
+                    "file_path": "unknown_source",
+                    "chunk_id": chunk_id,
+                }
+            )
+            if chunk_tracking is not None:
+                chunk_tracking[chunk_id] = {
+                    "source": "M",
+                    "frequency": 1,
+                    "order": len(merged_chunks),
+                }
+
     logger.info(
         f"Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})"
     )
@@ -4517,6 +4563,7 @@ async def _build_context_str(
             "content": chunk["content"],
         }
         for key in (
+            "chunk_id",
             "is_multimodal",
             "modal_type",
             "asset_id",

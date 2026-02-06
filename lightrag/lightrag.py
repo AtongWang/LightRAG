@@ -3235,6 +3235,7 @@ class LightRAG:
             model_func=param.model_func,
             user_prompt=param.user_prompt,
             enable_rerank=param.enable_rerank,
+            chunk_ids=param.chunk_ids,
         )
 
         query_result = None

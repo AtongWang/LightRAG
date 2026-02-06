@@ -270,17 +270,12 @@ Consider the conversation history if provided to maintain conversational flow an
 - [3] Document Title Three
 ```
 
-6. Multimodal Output (if applicable):
-  - If the **Context** contains multimodal items (chunks with `is_multimodal: true` or `modal_type` in ["image","table","equation","audio","video","generic"]), you MUST output one or more `### Multimodal` blocks **immediately after the most relevant paragraph**.
-  - Do NOT move all multimodal content to the end. Each block should only include items relevant to the paragraph above it.
-  - Do NOT render tables or equations directly in the main body. All table/equation/image content must be represented only inside `### Multimodal` JSON blocks.
-  - If you must mention an equation in the main body, wrap it in LaTeX delimiters (`$...$` or `$$...$$`). Otherwise, move it to the nearest `### Multimodal` block with `equation_latex`.
-  - Each `### Multimodal` block must use the exact heading `### Multimodal` (English) and contain a fenced JSON payload:
-```json
-{{"items":[{{"type":"image","asset_id":"...","description":"...","source_file":"...","page_index":0}}]}}
-```
-  - For tables, include `table_html` or `table_markdown` if present in Context. For equations, include `equation_latex` if present.
-  - Use only fields present in the **Context** (do not invent asset_id or metadata). If no multimodal items exist, omit all `### Multimodal` blocks.
+ 6. Multimodal Output (if applicable):
+  - If the **Context** contains multimodal items (chunks with `is_multimodal: true` or `modal_type` in ["image","table","equation","audio","video","generic"]), you MUST insert inline anchors in the answer body using the exact format `[[MM:chunk_id]]`.
+  - Place each anchor immediately after the most relevant paragraph. Do NOT move all anchors to the end.
+  - Use only `chunk_id` values present in the **Context**. Never invent or modify IDs.
+  - Do NOT output `### Multimodal` JSON blocks. Do NOT render tables or equations directly in the main body.
+  - If no multimodal items exist, omit all anchors.
 
 7. Additional Instructions: {user_prompt}
 
@@ -336,17 +331,12 @@ Consider the conversation history if provided to maintain conversational flow an
 - [3] Document Title Three
 ```
 
-6. Multimodal Output (if applicable):
-  - If the **Context** contains multimodal items (chunks with `is_multimodal: true` or `modal_type` in ["image","table","equation","audio","video","generic"]), you MUST output one or more `### Multimodal` blocks **immediately after the most relevant paragraph**.
-  - Do NOT move all multimodal content to the end. Each block should only include items relevant to the paragraph above it.
-  - Do NOT render tables or equations directly in the main body. All table/equation/image content must be represented only inside `### Multimodal` JSON blocks.
-  - If you must mention an equation in the main body, wrap it in LaTeX delimiters (`$...$` or `$$...$$`). Otherwise, move it to the nearest `### Multimodal` block with `equation_latex`.
-  - Each `### Multimodal` block must use the exact heading `### Multimodal` (English) and contain a fenced JSON payload:
-```json
-{{"items":[{{"type":"image","asset_id":"...","description":"...","source_file":"...","page_index":0}}]}}
-```
-  - For tables, include `table_html` or `table_markdown` if present in Context. For equations, include `equation_latex` if present.
-  - Use only fields present in the **Context** (do not invent asset_id or metadata). If no multimodal items exist, omit all `### Multimodal` blocks.
+ 6. Multimodal Output (if applicable):
+  - If the **Context** contains multimodal items (chunks with `is_multimodal: true` or `modal_type` in ["image","table","equation","audio","video","generic"]), you MUST insert inline anchors in the answer body using the exact format `[[MM:chunk_id]]`.
+  - Place each anchor immediately after the most relevant paragraph. Do NOT move all anchors to the end.
+  - Use only `chunk_id` values present in the **Context**. Never invent or modify IDs.
+  - Do NOT output `### Multimodal` JSON blocks. Do NOT render tables or equations directly in the main body.
+  - If no multimodal items exist, omit all anchors.
 
 7. Additional Instructions: {user_prompt}
 

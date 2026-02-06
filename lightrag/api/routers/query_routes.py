@@ -3,10 +3,10 @@ This module contains all query-related routes for the LightRAG API.
 """
 
 import json
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, cast
 from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
-from lightrag.types import MultimodalQueryResult
+from lightrag.types import MultimodalQueryResult, MultimodalType
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
@@ -135,7 +135,9 @@ class QueryRequest(BaseModel):
                 raise ValueError("Each message 'role' must be a non-empty string.")
         return conversation_history
 
-    def to_query_params(self, is_stream: bool, chunk_ids: list[str] = None) -> "QueryParam":
+    def to_query_params(
+        self, is_stream: bool, chunk_ids: list[str] = None
+    ) -> "QueryParam":
         """Converts a QueryRequest instance into a QueryParam instance."""
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
@@ -146,11 +148,11 @@ class QueryRequest(BaseModel):
         # Ensure `mode` and `stream` are set explicitly
         param = QueryParam(**request_data)
         param.stream = is_stream
-        
+
         # Set chunk_ids for project-level filtering
         if chunk_ids:
             param.chunk_ids = chunk_ids
-        
+
         return param
 
 
@@ -212,13 +214,17 @@ class StreamChunkResponse(BaseModel):
 async def _build_multimodal_results(
     chunks: List[Dict[str, Any]] | None,
     asset_storage: Any | None,
-) -> List[Dict[str, Any]]:
+) -> List[MultimodalQueryResult]:
     if not chunks:
         logger.debug(f"[_build_multimodal_results] No chunks provided")
         return []
 
     # Initialize asset_storage if not already initialized
-    if asset_storage and hasattr(asset_storage, '_initialized') and not asset_storage._initialized:
+    if (
+        asset_storage
+        and hasattr(asset_storage, "_initialized")
+        and not asset_storage._initialized
+    ):
         try:
             await asset_storage.initialize()
         except Exception as e:
@@ -226,7 +232,7 @@ async def _build_multimodal_results(
             asset_storage = None
 
     logger.debug(f"[_build_multimodal_results] Processing {len(chunks)} chunks")
-    results: List[Dict[str, Any]] = []
+    results: List[MultimodalQueryResult] = []
     multimodal_count = 0
 
     for chunk in chunks:
@@ -242,8 +248,12 @@ async def _build_multimodal_results(
         if asset_storage and asset_id:
             try:
                 # Use correct base_url: routes are at /multimodal, not /api/multimodal
-                asset_url = asset_storage.get_asset_url(asset_id, base_url="/multimodal")
-                thumbnail_url = asset_storage.get_thumbnail_url(asset_id, base_url="/multimodal")
+                asset_url = asset_storage.get_asset_url(
+                    asset_id, base_url="/multimodal"
+                )
+                thumbnail_url = asset_storage.get_thumbnail_url(
+                    asset_id, base_url="/multimodal"
+                )
             except Exception as e:
                 logger.debug(f"Failed to get asset URLs for {asset_id}: {e}")
                 asset_url = None
@@ -262,12 +272,124 @@ async def _build_multimodal_results(
                 equation_latex=chunk.get("equation_latex"),
                 source_file=chunk.get("file_path") or chunk.get("source_file"),
                 page_index=chunk.get("page_idx"),
-            ).model_dump()
+            )
         )
         multimodal_count += 1
 
-    logger.debug(f"[_build_multimodal_results] Found {multimodal_count} multimodal chunks")
+    logger.debug(
+        f"[_build_multimodal_results] Found {multimodal_count} multimodal chunks"
+    )
     logger.debug(f"[_build_multimodal_results] Returning {len(results)} results")
+    return results
+
+
+async def _build_multimodal_results_from_entities(
+    entities: List[Dict[str, Any]] | None,
+    asset_storage: Any | None,
+) -> List[MultimodalQueryResult]:
+    if not entities:
+        logger.debug("[_build_multimodal_results_from_entities] No entities provided")
+        return []
+
+    if (
+        asset_storage
+        and hasattr(asset_storage, "_initialized")
+        and not asset_storage._initialized
+    ):
+        try:
+            await asset_storage.initialize()
+        except Exception as e:
+            logger.warning(f"Failed to initialize asset_storage: {e}")
+            asset_storage = None
+
+    def normalize_modal_type(value: str | None) -> MultimodalType:
+        normalized = (value or "").strip().lower()
+        if normalized in {"image", "table", "equation", "audio", "video", "generic"}:
+            return cast(MultimodalType, normalized)
+        if normalized in {"figure", "chart", "diagram"}:
+            return "image"
+        if normalized in {"图像", "图片"}:
+            return "image"
+        if normalized in {"表格"}:
+            return "table"
+        if normalized in {"公式"}:
+            return "equation"
+        return "generic"
+
+    results: List[MultimodalQueryResult] = []
+    multimodal_count = 0
+
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+
+        meta = entity.get("multimodal_meta")
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except json.JSONDecodeError:
+                meta = {}
+        meta = meta if isinstance(meta, dict) else {}
+
+        if not (
+            entity.get("is_multimodal")
+            or meta.get("is_multimodal")
+            or entity.get("asset_id")
+            or meta.get("asset_id")
+            or entity.get("table_html")
+            or meta.get("table_html")
+            or entity.get("equation_latex")
+            or meta.get("equation_latex")
+        ):
+            continue
+
+        modal_type = normalize_modal_type(
+            entity.get("modal_type")
+            or meta.get("modal_type")
+            or entity.get("entity_type")
+        )
+
+        asset_id = entity.get("asset_id") or meta.get("asset_id")
+        asset_url = None
+        thumbnail_url = None
+        if asset_storage and asset_id:
+            try:
+                asset_url = asset_storage.get_asset_url(
+                    asset_id, base_url="/multimodal"
+                )
+                thumbnail_url = asset_storage.get_thumbnail_url(
+                    asset_id, base_url="/multimodal"
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get asset URLs for {asset_id}: {e}")
+                asset_url = None
+                thumbnail_url = None
+
+        results.append(
+            MultimodalQueryResult(
+                content_type=modal_type,
+                content_id=entity.get("source_id") or entity.get("entity_name", ""),
+                asset_id=asset_id,
+                description=entity.get("description", ""),
+                asset_url=asset_url,
+                thumbnail_url=thumbnail_url,
+                table_html=entity.get("table_html") or meta.get("table_html"),
+                table_markdown=entity.get("table_markdown")
+                or meta.get("table_markdown"),
+                equation_latex=entity.get("equation_latex")
+                or meta.get("equation_latex"),
+                source_file=entity.get("file_path"),
+                page_index=entity.get("page_idx") or meta.get("page_idx"),
+            )
+        )
+        multimodal_count += 1
+
+    logger.debug(
+        f"[_build_multimodal_results_from_entities] Found {multimodal_count} multimodal entities"
+    )
+    logger.debug(
+        f"[_build_multimodal_results_from_entities] Returning {len(results)} results"
+    )
     return results
 
 
@@ -284,48 +406,50 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     async def get_project_chunk_ids(project_id: str) -> list[str]:
         """
         Get all chunk IDs belonging to a specific project.
-        
+
         Args:
             project_id: The project ID to get chunks for
-            
+
         Returns:
             List of chunk IDs belonging to the project, or None if project not found
         """
         if not project_id:
             return None
-            
+
         try:
             from lightrag.projects import ProjectManager
-            
+
             kv_storage = rag.llm_response_cache
             project_manager = ProjectManager(kv_storage)
-            
+
             project = await project_manager.get(project_id)
             if not project:
                 logger.warning(f"Project '{project_id}' not found for query filtering")
                 return None
-            
+
             # Get all documents belonging to this project
             doc_status_storage = rag.doc_status
             docs_list, total_count = await doc_status_storage.get_docs_paginated(
                 project_id=project_id,
                 page=1,
-                page_size=10000  # Large enough to get all docs
+                page_size=10000,  # Large enough to get all docs
             )
-            
+
             if not docs_list:
                 logger.info(f"No documents found for project '{project_id}'")
                 return []
-            
+
             # Collect all chunk IDs from project documents
             project_chunk_ids = []
             for doc_id, doc_status in docs_list:
                 if doc_status.chunks_list:
                     project_chunk_ids.extend(doc_status.chunks_list)
-            
-            logger.info(f"Project '{project_id}' has {len(project_chunk_ids)} chunks for query filtering")
+
+            logger.info(
+                f"Project '{project_id}' has {len(project_chunk_ids)} chunks for query filtering"
+            )
             return project_chunk_ids
-            
+
         except Exception as e:
             logger.error(f"Error getting project chunk IDs for '{project_id}': {e}")
             return None
@@ -547,9 +671,9 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     # Project has no documents yet
                     return QueryResponse(
                         response="该项目暂无文档，无法进行知识检索。请先上传文档。",
-                        references=None
+                        references=None,
                     )
-            
+
             param = request.to_query_params(
                 False, chunk_ids=chunk_ids
             )  # Ensure stream=False for non-streaming endpoint
@@ -592,15 +716,22 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
-            # Extract chunks for multimodal processing
-            chunks = data.get("chunks", [])
-            logger.info(f"[/query] Received {len(chunks)} chunks from query result")
-
-            multimodal_results = await _build_multimodal_results(
-                chunks, asset_storage
+            # Build multimodal results from entities first, then fall back to chunks
+            entities = data.get("entities", [])
+            multimodal_results = await _build_multimodal_results_from_entities(
+                entities, asset_storage
             )
 
-            logger.info(f"[/query] Returning {len(multimodal_results) if multimodal_results else 0} multimodal results")
+            chunks = data.get("chunks", [])
+            logger.info(f"[/query] Received {len(chunks)} chunks from query result")
+            if not multimodal_results:
+                multimodal_results = await _build_multimodal_results(
+                    chunks, asset_storage
+                )
+
+            logger.info(
+                f"[/query] Returning {len(multimodal_results) if multimodal_results else 0} multimodal results"
+            )
 
             # Return response with or without references based on request
             if request.include_references:
@@ -833,10 +964,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 if chunk_ids is not None and len(chunk_ids) == 0:
                     # Project has no documents yet - return error as stream
                     from fastapi.responses import StreamingResponse
-                    
+
                     async def empty_project_generator():
-                        yield f'{json.dumps({"response": "该项目暂无文档，无法进行知识检索。请先上传文档。"})}\n'
-                    
+                        yield f"{json.dumps({'response': '该项目暂无文档，无法进行知识检索。请先上传文档。'})}\n"
+
                     return StreamingResponse(
                         empty_project_generator(),
                         media_type="application/x-ndjson",
@@ -846,7 +977,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                             "Content-Type": "application/x-ndjson",
                         },
                     )
-            
+
             # Use the stream parameter from the request, defaulting to True if not specified
             stream_mode = request.stream if request.stream is not None else True
             param = request.to_query_params(stream_mode, chunk_ids=chunk_ids)
@@ -858,13 +989,22 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             data = result.get("data", {})
             chunks = data.get("chunks", [])
 
-            logger.info(f"[/query/stream] Received {len(chunks)} chunks from query result")
-
-            multimodal_results = await _build_multimodal_results(
-                chunks, asset_storage
+            logger.info(
+                f"[/query/stream] Received {len(chunks)} chunks from query result"
             )
 
-            logger.info(f"[/query/stream] Built {len(multimodal_results) if multimodal_results else 0} multimodal results")
+            entities = data.get("entities", [])
+            multimodal_results = await _build_multimodal_results_from_entities(
+                entities, asset_storage
+            )
+            if not multimodal_results:
+                multimodal_results = await _build_multimodal_results(
+                    chunks, asset_storage
+                )
+
+            logger.info(
+                f"[/query/stream] Built {len(multimodal_results) if multimodal_results else 0} multimodal results"
+            )
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
@@ -901,7 +1041,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     if request.include_references:
                         first_chunk["references"] = references
                     if multimodal_results:
-                        first_chunk["multimodal_results"] = multimodal_results
+                        first_chunk["multimodal_results"] = [
+                            item.model_dump() if isinstance(item, BaseModel) else item
+                            for item in multimodal_results
+                        ]
                     if first_chunk:
                         yield f"{json.dumps(first_chunk)}\n"
 
@@ -925,7 +1068,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     if request.include_references:
                         complete_response["references"] = references
                     if multimodal_results:
-                        complete_response["multimodal_results"] = multimodal_results
+                        complete_response["multimodal_results"] = [
+                            item.model_dump() if isinstance(item, BaseModel) else item
+                            for item in multimodal_results
+                        ]
 
                     yield f"{json.dumps(complete_response)}\n"
 
@@ -1352,11 +1498,21 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     return QueryDataResponse(
                         status="success",
                         message="Project has no documents",
-                        data={"entities": [], "relationships": [], "chunks": [], "references": []},
-                        metadata={"query_mode": request.mode, "project_id": request.project_id}
+                        data={
+                            "entities": [],
+                            "relationships": [],
+                            "chunks": [],
+                            "references": [],
+                        },
+                        metadata={
+                            "query_mode": request.mode,
+                            "project_id": request.project_id,
+                        },
                     )
-            
-            param = request.to_query_params(False, chunk_ids=chunk_ids)  # No streaming for data endpoint
+
+            param = request.to_query_params(
+                False, chunk_ids=chunk_ids
+            )  # No streaming for data endpoint
             response = await rag.aquery_data(request.query, param=param)
 
             # aquery_data returns the new format with status, message, data, and metadata

@@ -3,7 +3,7 @@
  * 支持从API加载图片并显示，带有加载状态和错误处理
  */
 
-import { useState, useEffect, useCallback, memo } from 'react'
+import { useState, useEffect, useCallback, memo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Image as ImageIcon, Loader2, AlertCircle, ZoomIn, ExternalLink } from 'lucide-react'
@@ -60,31 +60,34 @@ export function MultimodalImage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isZoomed, setIsZoomed] = useState(false)
+  const blobUrlRef = useRef<string | null>(null)
 
   // 加载图片
   useEffect(() => {
-    let blobUrl: string | null = null
+    let isMounted = true
 
     const loadImage = async () => {
-      // 如果有直接的src，使用它
-      if (src) {
-        setImageSrc(src)
-        return
-      }
-
       // 如果有base64数据，构建data URL
       if (base64Data) {
-        setImageSrc(`data:${mimeType};base64,${base64Data}`)
+        if (isMounted) {
+          setImageSrc(`data:${mimeType};base64,${base64Data}`)
+        }
         return
       }
 
-      // 如果有assetId，从API加载
+      // 如果有assetId，从API加载（优先使用带鉴权的Blob）
       if (assetId) {
         setLoading(true)
         setError(null)
         try {
-          blobUrl = await createAssetBlobUrl(assetId)
-          setImageSrc(blobUrl)
+          const blobUrl = await createAssetBlobUrl(assetId)
+          if (blobUrlRef.current && blobUrlRef.current !== blobUrl) {
+            URL.revokeObjectURL(blobUrlRef.current)
+          }
+          blobUrlRef.current = blobUrl
+          if (isMounted) {
+            setImageSrc(blobUrl)
+          }
         } catch (e) {
           console.error('Failed to load image:', e)
           // 根据错误类型提供更具体的错误信息
@@ -104,7 +107,17 @@ export function MultimodalImage({
             setError(t('multimodal.image.loadFailed'))
           }
         } finally {
-          setLoading(false)
+          if (isMounted) {
+            setLoading(false)
+          }
+        }
+        return
+      }
+
+      // 如果有直接的src，使用它
+      if (src) {
+        if (isMounted) {
+          setImageSrc(src)
         }
       }
     }
@@ -113,8 +126,10 @@ export function MultimodalImage({
 
     // 清理blob URL
     return () => {
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl)
+      isMounted = false
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
       }
     }
   }, [assetId, src, base64Data, mimeType])

@@ -35,6 +35,7 @@ interface ReferenceItem {
 /** 多模态内容引用 */
 interface MultimodalReference {
   type: 'image' | 'table' | 'equation' | 'audio' | 'video' | 'generic'
+  chunk_id?: string
   asset_id?: string
   asset_url?: string
   description?: string
@@ -64,14 +65,28 @@ function enrichMultimodalItems(
   if (!fallback || fallback.length === 0) return items
 
   const matchBy = (item: MultimodalReference) => {
+    // 1. Match by chunk_id with normalization (handles slight formatting differences from LLM)
+    if (item.chunk_id) {
+      const normalizedChunkId = normalizeText(item.chunk_id)
+      const exactMatch = fallback.find(candidate => candidate.chunk_id === item.chunk_id)
+      if (exactMatch) return exactMatch
+      // Try normalized match
+      const normalizedMatch = fallback.find(candidate =>
+        candidate.chunk_id && normalizeText(candidate.chunk_id) === normalizedChunkId
+      )
+      if (normalizedMatch) return normalizedMatch
+    }
+    // 2. Match by asset_id
     if (item.asset_id) {
       return fallback.find(candidate => candidate.asset_id === item.asset_id)
     }
+    // 3. Match by source_file + type
     if (item.source_file && item.type) {
       return fallback.find(
         candidate => candidate.type === item.type && candidate.source_file === item.source_file
       )
     }
+    // 4. Match by description similarity + type
     if (item.description && item.type) {
       const needle = normalizeText(item.description)
       return fallback.find(candidate => {
@@ -80,6 +95,13 @@ function enrichMultimodalItems(
         return needle.length > 0 && (haystack.includes(needle) || needle.includes(haystack))
       })
     }
+    // 5. Fallback: if only one item in fallback of matching type, use it
+    if (item.type && item.type !== 'generic') {
+      const typeMatches = fallback.filter(candidate => candidate.type === item.type)
+      if (typeMatches.length === 1) return typeMatches[0]
+    }
+    // 6. Ultimate fallback: if only one item in fallback total, use it
+    if (fallback.length === 1) return fallback[0]
     return undefined
   }
 
@@ -89,14 +111,45 @@ function enrichMultimodalItems(
     return {
       ...fallbackItem,
       ...item,
+      type: item.type === 'generic' ? fallbackItem.type : item.type,
+      chunk_id: item.chunk_id ?? fallbackItem.chunk_id,
+      asset_id: item.asset_id ?? fallbackItem.asset_id,
+      asset_url: item.asset_url ?? fallbackItem.asset_url,
+      image_data: item.image_data ?? fallbackItem.image_data,
       table_data: item.table_data ?? fallbackItem.table_data,
       table_html: item.table_html ?? fallbackItem.table_html,
       equation_latex: item.equation_latex ?? fallbackItem.equation_latex,
-      image_data: item.image_data ?? fallbackItem.image_data,
-      asset_url: item.asset_url ?? fallbackItem.asset_url,
+      description: item.description ?? fallbackItem.description,
       source_file: item.source_file ?? fallbackItem.source_file
     }
   })
+}
+
+function splitTextByAnchors(text: string): InlineBlock[] {
+  const blocks: InlineBlock[] = []
+  const pattern = /\[\[MM:([^\]]+)\]\]/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      blocks.push({ type: 'text', content: text.slice(lastIndex, match.index) })
+    }
+    const chunkId = match[1].trim()
+    if (chunkId) {
+      blocks.push({
+        type: 'multimodal',
+        items: [{ type: 'generic', chunk_id: chunkId }]
+      })
+    }
+    lastIndex = pattern.lastIndex
+  }
+
+  if (lastIndex < text.length) {
+    blocks.push({ type: 'text', content: text.slice(lastIndex) })
+  }
+
+  return blocks
 }
 
 function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
@@ -107,7 +160,9 @@ function parseInlineMultimodalBlocks(content: string): InlineBlock[] {
 
   const flushBuffer = () => {
     if (buffer.length > 0) {
-      blocks.push({ type: 'text', content: buffer.join('\n') })
+      const bufferedText = buffer.join('\n')
+      const anchorBlocks = splitTextByAnchors(bufferedText)
+      blocks.push(...anchorBlocks)
       buffer = []
     }
   }
@@ -287,38 +342,49 @@ export function ChatInterface() {
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
   }
 
-  const hasInlineMultimodal = (content: string) =>
-    parseInlineMultimodalBlocks(content).some(block => block.type === 'multimodal')
+  // Check if content has inline multimodal blocks that can actually be rendered
+  // (i.e., after enrichment they have renderable properties like asset_id, image_data, etc.)
+  const hasRenderableInlineMultimodal = (content: string, multimodal?: MultimodalReference[]) => {
+    const blocks = parseInlineMultimodalBlocks(content)
+    for (const block of blocks) {
+      if (block.type === 'multimodal') {
+        const enriched = enrichMultimodalItems(block.items, multimodal)
+        const renderable = enriched.filter(item =>
+          Boolean(item.asset_id || item.asset_url || item.image_data ||
+                  item.table_html || item.table_data || item.equation_latex)
+        )
+        if (renderable.length > 0) return true
+      }
+    }
+    return false
+  }
 
-  const renderMultimodalItems = (items: MultimodalReference[], keyPrefix: string) => (
-    <div className="space-y-3">
-      {items.map((item, index) => (
-        <div
-          key={`${keyPrefix}-${index}`}
-          className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800/50"
-        >
-          <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-base">
-              {item.type === 'image' ? '🖼️' : item.type === 'table' ? '📊' : item.type === 'equation' ? '📐' : '📎'}
-            </span>
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-              {item.type === 'image' ? '图片' : item.type === 'table' ? '表格' : item.type === 'equation' ? '公式' : '附件'}
-            </span>
-            {item.source_file && (
-              <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto truncate max-w-[150px]">
-                {item.source_file}
-              </span>
-            )}
-          </div>
 
-          <div className="p-3">
+  const renderMultimodalItems = (items: MultimodalReference[], keyPrefix: string) => {
+    const renderableItems = items.filter(item =>
+      Boolean(
+        item.asset_id || item.asset_url || item.image_data ||
+        item.table_html || item.table_data ||
+        item.equation_latex
+      )
+    )
+
+    if (renderableItems.length === 0) return null
+
+    return (
+      <div className="space-y-4">
+        {renderableItems.map((item, index) => (
+          <div
+            key={`${keyPrefix}-${item.chunk_id || item.asset_id || index}`}
+            className="space-y-2"
+          >
             {item.type === 'image' && (
               <MultimodalImage
                 assetId={item.asset_id}
                 src={item.asset_url}
                 base64Data={item.image_data}
                 alt={item.description}
-                maxHeight={200}
+                maxHeight={240}
               />
             )}
 
@@ -326,7 +392,7 @@ export function ChatInterface() {
               <MultimodalTable
                 htmlData={item.table_html}
                 markdownData={item.table_data}
-                maxHeight={200}
+                maxHeight={220}
                 expandable
               />
             )}
@@ -335,16 +401,18 @@ export function ChatInterface() {
               <MultimodalEquation latex={item.equation_latex} />
             )}
 
-            {item.description && (
-              <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                {item.description}
-              </p>
+            {(item.description || item.source_file) && (
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {item.description && <span>{item.description}</span>}
+                {item.description && item.source_file && <span className="mx-1">·</span>}
+                {item.source_file && <span>{item.source_file}</span>}
+              </div>
             )}
           </div>
-        </div>
-      ))}
-    </div>
-  )
+        ))}
+      </div>
+    )
+  }
 
   // 构建对话历史（排除系统消息和欢迎消息）
   const buildConversationHistory = useCallback((): ApiMessage[] => {
@@ -463,6 +531,7 @@ export function ChatInterface() {
           const multimodal = Array.isArray(meta.multimodal_results)
             ? meta.multimodal_results.map((item: MultimodalQueryResult) => ({
                 type: item.content_type,
+                chunk_id: item.content_id,
                 asset_id: item.asset_id,
                 asset_url: item.asset_url,
                 description: item.description,
@@ -618,8 +687,8 @@ export function ChatInterface() {
                     )
                   )}
 
-                  {/* 多模态内容展示 (fallback when no inline blocks) */}
-                  {!hasInlineMultimodal(message.content) &&
+                  {/* 多模态内容展示 (fallback when inline blocks don't have renderable content) */}
+                  {!hasRenderableInlineMultimodal(message.content, message.multimodal) &&
                     message.multimodal &&
                     message.multimodal.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
