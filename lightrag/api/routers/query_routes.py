@@ -247,6 +247,7 @@ async def _build_multimodal_results(
         thumbnail_url = None
         if asset_storage and asset_id:
             try:
+                await asset_storage.get_asset(asset_id)
                 # Use correct base_url: routes are at /multimodal, not /api/multimodal
                 asset_url = asset_storage.get_asset_url(
                     asset_id, base_url="/multimodal"
@@ -354,6 +355,7 @@ async def _build_multimodal_results_from_entities(
         thumbnail_url = None
         if asset_storage and asset_id:
             try:
+                await asset_storage.get_asset(asset_id)
                 asset_url = asset_storage.get_asset_url(
                     asset_id, base_url="/multimodal"
                 )
@@ -393,6 +395,17 @@ async def _build_multimodal_results_from_entities(
     return results
 
 
+async def _collect_multimodal_results(entities, chunks, asset_storage):
+    """Prefer source chunks without dropping additional entity-only assets."""
+    candidates = await _build_multimodal_results(chunks, asset_storage)
+    candidates.extend(await _build_multimodal_results_from_entities(entities, asset_storage))
+    results = {}
+    for item in candidates:
+        key = (item.content_type, item.asset_id or item.table_html or item.equation_latex or item.content_id)
+        results.setdefault(key, item)
+    return list(results.values())
+
+
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
     asset_storage = None
@@ -419,21 +432,19 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         try:
             from lightrag.projects import ProjectManager
 
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             project = await project_manager.get(project_id)
             if not project:
                 logger.warning(f"Project '{project_id}' not found for query filtering")
-                return None
+                raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
             # Get all documents belonging to this project
             doc_status_storage = rag.doc_status
-            docs_list, total_count = await doc_status_storage.get_docs_paginated(
-                project_id=project_id,
-                page=1,
-                page_size=10000,  # Large enough to get all docs
-            )
+            from lightrag.projects.service import get_project_documents
+
+            docs_list, total_count = await get_project_documents(doc_status_storage, project_id)
 
             if not docs_list:
                 logger.info(f"No documents found for project '{project_id}'")
@@ -450,9 +461,11 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             )
             return project_chunk_ids
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error getting project chunk IDs for '{project_id}': {e}")
-            return None
+            raise HTTPException(status_code=500, detail="Project filtering failed") from e
 
     @router.post(
         "/query",
@@ -716,18 +729,9 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
-            # Build multimodal results from entities first, then fall back to chunks
-            entities = data.get("entities", [])
-            multimodal_results = await _build_multimodal_results_from_entities(
-                entities, asset_storage
+            multimodal_results = await _collect_multimodal_results(
+                data.get("entities", []), data.get("chunks", []), asset_storage,
             )
-
-            chunks = data.get("chunks", [])
-            logger.info(f"[/query] Received {len(chunks)} chunks from query result")
-            if not multimodal_results:
-                multimodal_results = await _build_multimodal_results(
-                    chunks, asset_storage
-                )
 
             logger.info(
                 f"[/query] Returning {len(multimodal_results) if multimodal_results else 0} multimodal results"
@@ -746,6 +750,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     references=None,
                     multimodal_results=multimodal_results or None,
                 )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
@@ -993,14 +999,9 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 f"[/query/stream] Received {len(chunks)} chunks from query result"
             )
 
-            entities = data.get("entities", [])
-            multimodal_results = await _build_multimodal_results_from_entities(
-                entities, asset_storage
+            multimodal_results = await _collect_multimodal_results(
+                data.get("entities", []), chunks, asset_storage,
             )
-            if not multimodal_results:
-                multimodal_results = await _build_multimodal_results(
-                    chunks, asset_storage
-                )
 
             logger.info(
                 f"[/query/stream] Built {len(multimodal_results) if multimodal_results else 0} multimodal results"
@@ -1085,6 +1086,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     "X-Accel-Buffering": "no",  # Ensure proper handling of streaming response when proxied by Nginx
                 },
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error processing streaming query: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
@@ -1525,6 +1528,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     message="Invalid response type",
                     data={},
                 )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error processing data query: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))

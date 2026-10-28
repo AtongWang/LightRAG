@@ -514,7 +514,7 @@ def create_multimodal_routes(rag, api_key: Optional[str] = None):
             from lightrag.multimodal import EnhancedMultimodalParser
             
             parser = EnhancedMultimodalParser(
-                parser_type="auto",
+                parser_type=rag.multimodal_parser_type,
                 mineru_api_url=rag.mineru_api_url if hasattr(rag, "mineru_api_url") else "http://localhost:8000",
                 raganything_url=rag.multimodal_raganything_url if hasattr(rag, "multimodal_raganything_url") else "http://127.0.0.1:30000",
             )
@@ -576,6 +576,12 @@ def create_multimodal_routes(rag, api_key: Optional[str] = None):
             
             if not file.filename:
                 raise HTTPException(status_code=400, detail="Filename is required")
+
+            if project_id:
+                from lightrag.projects import ProjectManager
+
+                if await ProjectManager(rag.project_metadata).get(project_id) is None:
+                    raise HTTPException(status_code=404, detail="Project not found")
             
             # Save uploaded file to temp location
             suffix = os.path.splitext(file.filename)[1] or ".pdf"

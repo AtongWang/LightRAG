@@ -134,6 +134,10 @@ class JsonKVStorage(BaseKVStorage):
                     results.append(None)
             return results
 
+    async def get_by_prefix(self, prefix: str) -> dict[str, dict[str, Any]]:
+        async with self._storage_lock:
+            return {key: dict(value) for key, value in self._data.items() if key.startswith(prefix)}
+
     async def filter_keys(self, keys: set[str]) -> set[str]:
         async with self._storage_lock:
             return set(keys) - set(self._data.keys())

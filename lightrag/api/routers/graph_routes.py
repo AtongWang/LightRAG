@@ -180,7 +180,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             # Get project workspace
             from lightrag.projects import ProjectManager
             from lightrag.constants import GRAPH_FIELD_SEP
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             project = await project_manager.get(project_id)
@@ -191,12 +191,9 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
             # Step 1: Get all documents belonging to this project
             doc_status_storage = rag.doc_status
-            # Use get_docs_paginated with a large page_size to get all project documents
-            docs_list, total_count = await doc_status_storage.get_docs_paginated(
-                project_id=project_id,
-                page=1,
-                page_size=10000  # Large enough to get all docs
-            )
+            from lightrag.projects.service import get_project_documents
+
+            docs_list, total_count = await get_project_documents(doc_status_storage, project_id)
 
             if not docs_list:
                 logger.info(f"No documents found for project '{project_id}'")

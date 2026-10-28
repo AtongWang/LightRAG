@@ -79,7 +79,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         """
         try:
             # 获取 KV Storage
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
 
             # 创建本体服务
             ontology_service = OntologyService(kv_storage)
@@ -133,7 +133,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         根据 ID 获取本体规范。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             ontology = await ontology_service.get(ontology_id)
@@ -163,7 +163,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         更新现有本体的部分字段。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             # 获取现有本体
@@ -207,7 +207,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         删除指定的本体规范。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             # 检查本体是否存在
@@ -238,7 +238,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         获取指定项目的当前本体。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             ontology = await ontology_service.get_by_project(project_id)
@@ -262,7 +262,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         验证本体规范的完整性和一致性。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
             validator = OntologyValidator()
 
@@ -294,7 +294,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         导出本体规范为 JSON 格式，用于备份或迁移。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             # 获取本体
@@ -326,7 +326,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
         会创建新的本体 ID。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             ontology_service = OntologyService(kv_storage)
 
             # 生成新的 ontology_id

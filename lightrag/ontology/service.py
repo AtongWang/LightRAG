@@ -64,6 +64,7 @@ class OntologyService:
             }
         )
 
+        await self.kv.index_done_callback()
         logger.info(f"创建本体: {spec.ontology_id}, project: {spec.project_id}")
         return spec
 
@@ -114,6 +115,7 @@ class OntologyService:
 
         # 清除缓存
         self._cache.pop(project_id, None)
+        await self.kv.index_done_callback()
 
         logger.info(
             f"更新本体: 项目={project_id}, 版本: {old_spec.version} → {spec.version}"
@@ -185,6 +187,8 @@ class OntologyService:
             # 清除缓存
             self._cache.pop(identifier, None)
             logger.info(f"删除本体: project_id={identifier}")
+
+        await self.kv.index_done_callback()
 
     async def inject_into_prompt(
         self,

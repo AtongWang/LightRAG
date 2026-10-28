@@ -79,6 +79,12 @@ class ClientManager:
 @final
 @dataclass
 class MongoKVStorage(BaseKVStorage):
+    async def get_by_prefix(self, prefix: str) -> dict[str, dict[str, Any]]:
+        import re
+
+        cursor = self._data.find({"_id": {"$regex": "^" + re.escape(prefix)}})
+        return {str(record["_id"]): record async for record in cursor}
+
     db: AsyncDatabase = field(default=None)
     _data: AsyncCollection = field(default=None)
 

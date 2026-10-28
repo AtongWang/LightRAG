@@ -671,17 +671,6 @@ def create_app(args):
         vision_host = args.vision_binding_host or args.llm_binding_host
         vision_api_key = args.vision_binding_api_key or args.llm_binding_api_key
         
-        # Check if vision is properly configured (need a vision-capable model)
-        # Common vision models: gpt-4o, gpt-4-vision-preview, claude-3-*, gemini-pro-vision
-        vision_capable_patterns = ['gpt-4o', 'gpt-4-vision', 'claude-3', 'gemini', 'llava', 'qwen-vl']
-        is_vision_capable = any(pattern in vision_model.lower() for pattern in vision_capable_patterns) if vision_model else False
-        
-        if not is_vision_capable:
-            logger.warning(
-                f"Vision model '{vision_model}' may not support vision capabilities. "
-                f"Set VISION_MODEL to a vision-capable model like gpt-4o, claude-3-sonnet, etc."
-            )
-
         async def vision_model_complete(
             prompt: str,
             system_prompt: str = None,

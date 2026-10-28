@@ -364,6 +364,10 @@ class BaseVectorStorage(StorageNameSpace, ABC):
 class BaseKVStorage(StorageNameSpace, ABC):
     embedding_func: EmbeddingFunc
 
+    async def get_by_prefix(self, prefix: str) -> dict[str, dict[str, Any]]:
+        """Return records whose IDs start with prefix, within this namespace."""
+        raise NotImplementedError(f"{type(self).__name__} does not support prefix reads")
+
     @abstractmethod
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
         """Get value by id"""

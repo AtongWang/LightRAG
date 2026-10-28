@@ -46,7 +46,7 @@ export function ProjectsList() {
   }
 
   return (
-    <div className="min-h-screen max-h-screen overflow-y-auto bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
+    <div className="h-full overflow-y-auto bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--paper-warm))] to-[hsl(var(--background))]">
       {/* 背景装饰 */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         {/* 光晕与纸感底纹 */}
@@ -87,7 +87,7 @@ export function ProjectsList() {
         </div>
       </div>
 
-      <div className="relative w-full max-w-screen-2xl mx-auto px-8 lg:px-16 py-10">
+      <div className="relative w-full max-w-[1536px] mx-auto px-4 sm:px-8 lg:px-16 py-10">
         {/* 页面标题区 */}
         <div className="text-center mb-12 animate-fade-in-up">
           {/* 主标题 */}
@@ -95,22 +95,16 @@ export function ProjectsList() {
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[hsl(var(--vermillion))] to-[hsl(var(--vermillion-dark))] flex items-center justify-center shadow-lg shadow-[hsl(var(--vermillion)/0.3)]">
               <Scroll className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-4xl font-bold tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-bold tracking-wide">
               <span className="bg-gradient-to-r from-[hsl(var(--vermillion))] via-[hsl(var(--vermillion-dark))] to-[hsl(var(--ink))] bg-clip-text text-transparent">
-                文化主题库
+                文化遗产基因表达系统
               </span>
             </h1>
           </div>
           
           {/* 副标题 */}
-          <p className="text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            <span className="text-[hsl(var(--jade))]">探索</span>
-            <span className="mx-1">·</span>
-            <span className="text-[hsl(var(--vermillion))]">传承</span>
-            <span className="mx-1">·</span>
-            <span className="text-[hsl(var(--gold-dark))]">创新</span>
-            <span className="mx-3">—</span>
-            构建您的文化知识图谱
+          <p className="text-[hsl(var(--muted-foreground))] max-w-2xl mx-auto leading-relaxed tracking-[0.2em]">
+            传中华文脉，启万象新生
           </p>
 
           {/* 装饰分隔线 */}
@@ -124,11 +118,12 @@ export function ProjectsList() {
         {/* 工具栏 */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 mb-8 animate-fade-in-up stagger-1">
           {/* 搜索框 */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative w-full sm:max-w-md">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="搜索文化主题..."
+              placeholder="搜索文化遗产基因..."
+              aria-label="搜索文化遗产基因"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-11 pr-4 py-3 bg-white dark:bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-xl focus:outline-none focus:ring-2 focus:ring-[hsl(var(--vermillion)/0.3)] focus:border-[hsl(var(--vermillion))] transition-all shadow-sm"
@@ -141,6 +136,8 @@ export function ProjectsList() {
             <div className="flex items-center bg-white dark:bg-[hsl(var(--card))] rounded-lg border border-[hsl(var(--border))] p-1 shadow-sm">
               <button
                 onClick={() => setViewMode('grid')}
+                aria-label="网格视图"
+                aria-pressed={viewMode === 'grid'}
                 className={cn(
                   "p-2 rounded-md transition-all",
                   viewMode === 'grid'
@@ -152,6 +149,8 @@ export function ProjectsList() {
               </button>
               <button
                 onClick={() => setViewMode('list')}
+                aria-label="列表视图"
+                aria-pressed={viewMode === 'list'}
                 className={cn(
                   "p-2 rounded-md transition-all",
                   viewMode === 'list'
@@ -280,8 +279,8 @@ function StatCard({
           {icon}
         </div>
         <div>
-          <p className="text-2xl font-bold text-foreground">{value}</p>
-          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-bold">{value}</p>
+          <p className="text-xs opacity-90">{label}</p>
         </div>
       </div>
     </div>

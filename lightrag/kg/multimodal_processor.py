@@ -355,6 +355,8 @@ Provide a clear description that captures the key information in this table."""
         # Get table data
         table_html = block.table_html or block.raw_data.get("table_html", "")
         table_body = block.table_body or block.raw_data.get("table_body", "")
+        if not table_html and "<table" in table_body.lower():
+            table_html = table_body
 
         result.table_html = table_html
         result.table_markdown = (

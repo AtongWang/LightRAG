@@ -125,6 +125,20 @@ class RedisConnectionManager:
 @final
 @dataclass
 class RedisKVStorage(BaseKVStorage):
+    @redis_retry
+    async def get_by_prefix(self, prefix: str) -> dict[str, dict[str, Any]]:
+        result = {}
+        namespace_prefix = f"{self.final_namespace}:"
+        async with self._get_redis_connection() as redis:
+            async for key in redis.scan_iter(match=f"{namespace_prefix}*"):
+                key = key.decode() if isinstance(key, bytes) else key
+                record_id = key[len(namespace_prefix):]
+                if record_id.startswith(prefix):
+                    value = await redis.get(key)
+                    if value is not None:
+                        result[record_id] = json.loads(value)
+        return result
+
     def __post_init__(self):
         # Check for REDIS_WORKSPACE environment variable first (higher priority)
         # This allows administrators to force a specific workspace for all Redis storage instances

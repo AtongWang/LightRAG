@@ -646,7 +646,7 @@ class LightRAG:
         self.embedding_token_limit = embedding_max_token_size
 
         # Fix global_config now
-        global_config = asdict(self)
+        global_config = self._get_config_dict()
         # Restore original EmbeddingFunc object (asdict converts it to dict)
         global_config["embedding_func"] = original_embedding_func
 
@@ -694,6 +694,14 @@ class LightRAG:
             workspace=self.workspace,
             global_config=global_config,
             embedding_func=self.embedding_func,
+        )
+
+        # Business metadata must survive model-cache maintenance on every backend.
+        from lightrag.kg.json_kv_impl import JsonKVStorage
+
+        self.project_metadata = JsonKVStorage(
+            namespace="project_metadata", workspace=self.workspace,
+            global_config=global_config, embedding_func=None,
         )
 
         self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
@@ -814,12 +822,16 @@ class LightRAG:
                 self.chunks_vdb,
                 self.chunk_entity_relation_graph,
                 self.llm_response_cache,
+                self.project_metadata,
                 self.doc_status,
             ):
                 if storage:
                     # logger.debug(f"Initializing storage: {storage}")
                     await storage.initialize()
 
+            from lightrag.projects.service import migrate_project_metadata
+
+            await migrate_project_metadata(self.llm_response_cache, self.project_metadata)
             self._storages_status = StoragesStatus.INITIALIZED
             logger.debug("All storage types initialized")
 
@@ -898,6 +910,7 @@ class LightRAG:
                 ("chunks_vdb", self.chunks_vdb),
                 ("chunk_entity_relation_graph", self.chunk_entity_relation_graph),
                 ("llm_response_cache", self.llm_response_cache),
+                ("project_metadata", self.project_metadata),
                 ("doc_status", self.doc_status),
             ]
 
@@ -940,6 +953,12 @@ class LightRAG:
                 logger.error(f"Failed to close multimodal parser: {e}")
             finally:
                 self._multimodal_parser = None
+
+        if self._enhanced_multimodal_parser is not None:
+            try:
+                await self._enhanced_multimodal_parser.close()
+            finally:
+                self._enhanced_multimodal_parser = None
 
     async def check_and_migrate_data(self):
         """Check if data migration is needed and perform migration if necessary"""
@@ -1437,9 +1456,10 @@ class LightRAG:
                 except Exception as e:
                     logger.error(f"Failed to read {fp}: {e}")
             if texts:
-                return await self.ainsert(
-                    texts, file_paths=file_paths, track_id=track_id
+                await self.apipeline_enqueue_documents(
+                    texts, file_paths=file_paths, track_id=track_id, metadata=metadata,
                 )
+                await self.apipeline_process_enqueue_documents()
             return track_id
 
         # Prepare document status tracking
@@ -1577,7 +1597,10 @@ class LightRAG:
         display_file_name = file_name
 
         # Create document entry
-        doc_key = doc_id or compute_mdhash_id(parse_result.content, prefix="doc-")
+        doc_key = doc_id or compute_mdhash_id(
+            f"{metadata['project_id']}:{parse_result.content}" if metadata and metadata.get("project_id") else parse_result.content,
+            prefix="doc-",
+        )
         new_docs = {
             doc_key: {
                 "content": parse_result.content,
@@ -1615,7 +1638,10 @@ class LightRAG:
             )
 
             for index, chunk_data in enumerate(text_chunks):
-                chunk_key = compute_mdhash_id(chunk_data["content"], prefix="chunk-")
+                chunk_key = compute_mdhash_id(
+                    f"{doc_key}:{chunk_data['content']}" if metadata and metadata.get("project_id") else chunk_data["content"],
+                    prefix="chunk-",
+                )
                 tokens = chunk_data["tokens"]
                 inserting_chunks[chunk_key] = {
                     "content": chunk_data["content"],
@@ -1718,9 +1744,6 @@ class LightRAG:
             )
 
         # Update doc_status storage
-        from lightrag.base import DocStatus
-        from datetime import datetime, timezone
-
         # Merge user-provided metadata (e.g., project_id) with parse result metadata
         combined_metadata = dict(parse_result.metadata) if parse_result.metadata else {}
         if metadata:
@@ -1898,7 +1921,10 @@ class LightRAG:
 
             # Generate contents dict of MD5 hash IDs and documents with paths
             contents = {
-                compute_mdhash_id(content, prefix="doc-"): {
+                compute_mdhash_id(
+                    f"{metadata['project_id']}:{content}" if metadata and metadata.get("project_id") else content,
+                    prefix="doc-",
+                ): {
                     "content": content,
                     "file_path": path,
                 }
@@ -2408,7 +2434,10 @@ class LightRAG:
 
                             # Build chunks dictionary
                             chunks: dict[str, Any] = {
-                                compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                                compute_mdhash_id(
+                                    f"{doc_id}:{dp['content']}" if status_doc.metadata.get("project_id") else dp["content"],
+                                    prefix="chunk-",
+                                ): {
                                     **dp,
                                     "full_doc_id": doc_id,
                                     "file_path": file_path,  # Add file path to each chunk
@@ -2599,7 +2628,7 @@ class LightRAG:
                                     knowledge_graph_inst=self.chunk_entity_relation_graph,
                                     entity_vdb=self.entities_vdb,
                                     relationships_vdb=self.relationships_vdb,
-                                    global_config=asdict(self),
+                                    global_config=self._get_config_dict(),
                                     full_entities_storage=self.full_entities,
                                     full_relations_storage=self.full_relations,
                                     doc_id=doc_id,
@@ -2804,6 +2833,7 @@ class LightRAG:
                 llm_response_cache=self.llm_response_cache,
                 text_chunks_storage=self.text_chunks,
                 doc_status_storage=self.doc_status,
+                project_metadata=self.project_metadata,
             )
             return chunk_results
         except Exception as e:
@@ -3214,7 +3244,7 @@ class LightRAG:
             actual data is nested under the 'data' field, with 'status' and 'message'
             fields at the top level.
         """
-        global_config = asdict(self)
+        global_config = self._get_config_dict()
 
         # Create a copy of param to avoid modifying the original
         data_param = QueryParam(
@@ -3263,6 +3293,7 @@ class LightRAG:
                 global_config,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
+                text_chunks_db=self.text_chunks,
             )
         elif data_param.mode == "bypass":
             logger.debug("[aquery_data] Using bypass mode")
@@ -3333,7 +3364,7 @@ class LightRAG:
         """
         logger.debug(f"[aquery_llm] Query param: {param}")
 
-        global_config = asdict(self)
+        global_config = self._get_config_dict()
 
         try:
             query_result = None
@@ -3359,6 +3390,7 @@ class LightRAG:
                     global_config,
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
+                    text_chunks_db=self.text_chunks,
                 )
             elif param.mode == "bypass":
                 # Bypass mode: directly use LLM without knowledge retrieval
@@ -4191,7 +4223,7 @@ class LightRAG:
                         relationships_vdb=self.relationships_vdb,
                         text_chunks_storage=self.text_chunks,
                         llm_response_cache=self.llm_response_cache,
-                        global_config=asdict(self),
+                        global_config=self._get_config_dict(),
                         pipeline_status=pipeline_status,
                         pipeline_status_lock=pipeline_status_lock,
                         entity_chunks_storage=self.entity_chunks,
@@ -4711,7 +4743,7 @@ class LightRAG:
         # Create enrichment service
         enrichment_service = EntityEnrichmentService(
             graph_storage=self.chunk_entity_relation_graph,
-            kv_storage=self.llm_response_cache,
+            kv_storage=self.project_metadata,
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")
@@ -4778,7 +4810,7 @@ class LightRAG:
         # Create enrichment service
         enrichment_service = EntityEnrichmentService(
             graph_storage=self.chunk_entity_relation_graph,
-            kv_storage=self.llm_response_cache,
+            kv_storage=self.project_metadata,
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")
@@ -4851,7 +4883,7 @@ class LightRAG:
         # Create enrichment service
         enrichment_service = EntityEnrichmentService(
             graph_storage=self.chunk_entity_relation_graph,
-            kv_storage=self.llm_response_cache,
+            kv_storage=self.project_metadata,
             llm_model_func=llm_func,
             config=EnrichmentConfig(
                 language=self.addon_params.get("language", "English")

@@ -151,13 +151,26 @@ class DocumentPipeline:
 
             api_config = MineruAPIConfig(
                 api_url=self.config.mineru_api_url,
-                timeout=self.config.mineru_api_timeout,
+                api_timeout=self.config.mineru_api_timeout,
                 backend=self.config.mineru_backend,
                 output_dir=self.config.output_dir,
                 parse_method=self.config.parse_method,
                 language=self.config.language,
             )
-            self._parser = MineruAPIParser(api_config)
+            self._parser = MineruAPIParser(config=api_config)
+
+        elif parser_type == "mineru_cloud":
+            from lightrag.parsers.mineru_api import MineruAPIConfig
+            from lightrag.parsers.mineru_cloud import MineruCloudParser
+
+            url = self.config.mineru_api_url
+            if url == "http://localhost:8000":
+                url = "https://mineru.net/api/v4"
+            config = MineruAPIConfig(
+                api_url=url, api_timeout=self.config.mineru_api_timeout,
+                output_dir=self.config.output_dir, language=self.config.language,
+            )
+            self._parser = MineruCloudParser(api_url=url, config=config)
 
         elif parser_type == "mineru_local":
             from lightrag.parsers.mineru_local import MineruLocalParser
@@ -196,7 +209,10 @@ class DocumentPipeline:
         try:
             parser = await self._get_parser()
             # check_availability may be sync or async, handle both
-            check_result = parser.check_availability()
+            if asyncio.iscoroutinefunction(parser.check_availability):
+                check_result = await parser.check_availability()
+            else:
+                check_result = await asyncio.to_thread(parser.check_availability)
             if asyncio.iscoroutine(check_result):
                 available = await check_result
             else:

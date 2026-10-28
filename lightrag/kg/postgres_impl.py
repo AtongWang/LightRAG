@@ -1872,6 +1872,16 @@ class ClientManager:
 class PGKVStorage(BaseKVStorage):
     db: PostgreSQLDB = field(default=None)
 
+    async def get_by_prefix(self, prefix: str) -> dict[str, dict[str, Any]]:
+        table_name = namespace_to_table_name(self.namespace)
+        rows = await self.db.query(
+            f"SELECT id FROM {table_name} WHERE workspace=$1 AND starts_with(id, $2)",
+            [self.workspace, prefix], multirows=True,
+        )
+        ids = [row["id"] for row in rows or []]
+        records = await self.get_by_ids(ids) if ids else []
+        return {record["id"]: record for record in records if record}
+
     def __post_init__(self):
         self._max_batch_size = self.global_config["embedding_batch_num"]
 

@@ -12,6 +12,41 @@ from ..base import BaseKVStorage
 from .models import Project
 
 
+async def get_project_documents(doc_status, project_id: str | None) -> tuple[list, int]:
+    """Read every document page so project filters never silently truncate."""
+    documents = []
+    page = 1
+    while True:
+        batch, total = await doc_status.get_docs_paginated(
+            project_id=project_id, page=page, page_size=200,
+        )
+        documents.extend(batch)
+        if len(documents) >= total:
+            return documents, total
+        if not batch:
+            raise RuntimeError("Project document pagination ended before its reported total")
+        page += 1
+
+
+async def migrate_project_metadata(source: BaseKVStorage, target: BaseKVStorage) -> None:
+    """Copy legacy business records durably before removing their cache copies."""
+    from lightrag.kg.shared_storage import get_namespace_lock
+
+    async with get_namespace_lock("project_metadata_migration", workspace=target.workspace):
+        records = {}
+        for prefix in ("project_", "onto_", "ontology_"):
+            records.update(await source.get_by_prefix(prefix))
+        if not records:
+            return
+        missing = await target.filter_keys(set(records))
+        if missing:
+            await target.upsert({key: records[key] for key in missing})
+        await target.index_done_callback()
+        await source.delete(list(records))
+        await source.index_done_callback()
+        logger.info("Migrated %s legacy project/ontology records", len(records))
+
+
 class ProjectManager:
     """项目管理器（基于 KV Storage）"""
 
@@ -47,6 +82,7 @@ class ProjectManager:
         await self.kv.upsert({
             f"project_{project_id}": project.to_dict()
         })
+        await self.kv.index_done_callback()
 
         logger.info(f"创建项目: {project_id}, workspace: {workspace}")
         return project
@@ -73,23 +109,8 @@ class ProjectManager:
 
     async def list_all(self) -> List[Project]:
         """列出所有项目"""
-        # 直接访问 KV 存储的内部数据结构扫描所有项目
         projects = []
-
-        # 使用 filter_keys 的反向逻辑来获取存在的项目键
-        # 首先扫描存储中所有以 "project_" 开头的键
-        if hasattr(self.kv, '_data') and hasattr(self.kv, '_storage_lock'):
-            async with self.kv._storage_lock:
-                all_keys = list(self.kv._data.keys())
-        else:
-            # 回退到缓存
-            return list(self._cache.values())
-
-        # 过滤出项目键
-        project_keys = [k for k in all_keys if k.startswith("project_")]
-
-        # 获取所有项目
-        for key in project_keys:
+        for key in await self.kv.get_by_prefix("project_"):
             project_id = key.replace("project_", "", 1)
             project = await self.get(project_id)
             if project:
@@ -109,6 +130,7 @@ class ProjectManager:
         from ..ontology import OntologyService
         ontology_service = OntologyService(self.kv)
         await ontology_service.delete(project_id)
+        await self.kv.index_done_callback()
 
         logger.info(f"删除项目: {project_id}")
 
@@ -128,6 +150,7 @@ class ProjectManager:
 
         # 更新缓存
         self._cache[project_id] = project
+        await self.kv.index_done_callback()
         logger.info(f"更新项目 {project_id} 的 ontology_id: {ontology_id}")
 
     async def update(self, project_id: str, **kwargs) -> Project:
@@ -164,6 +187,7 @@ class ProjectManager:
 
         # 更新缓存
         self._cache[project_id] = project
+        await self.kv.index_done_callback()
         logger.info(f"更新项目: {project_id}")
 
         return project

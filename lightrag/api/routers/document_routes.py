@@ -1584,7 +1584,9 @@ async def pipeline_enqueue_file(
                 # Move file to __enqueued__ directory after enqueuing
                 try:
                     enqueued_dir = file_path.parent / "__enqueued__"
-                    enqueued_dir.mkdir(exist_ok=True)
+                    if metadata and metadata.get("storage_file_path"):
+                        enqueued_dir = file_path.parent.parent / "__enqueued__" / file_path.parent.name
+                    enqueued_dir.mkdir(parents=True, exist_ok=True)
 
                     # Generate unique filename to avoid conflicts
                     unique_filename = get_unique_filename_in_enqueued(
@@ -1874,6 +1876,8 @@ async def background_delete_documents(
 
             file_path = "#"
             try:
+                document = await rag.doc_status.get_by_id(doc_id)
+                stored_file_path = ((document or {}).get("metadata") or {}).get("storage_file_path")
                 result = await rag.adelete_by_doc_id(
                     doc_id, delete_llm_cache=delete_llm_cache
                 )
@@ -1899,7 +1903,7 @@ async def background_delete_documents(
                             deleted_files = []
                             # SECURITY FIX: Use secure path validation to prevent arbitrary file deletion
                             safe_file_path = validate_file_path_security(
-                                result.file_path, doc_manager.input_dir
+                                stored_file_path or result.file_path, doc_manager.input_dir
                             )
 
                             if safe_file_path is None:
@@ -1939,6 +1943,8 @@ async def background_delete_documents(
 
                                 # Also check and delete files from __enqueued__ directory
                                 enqueued_dir = doc_manager.input_dir / "__enqueued__"
+                                if stored_file_path:
+                                    enqueued_dir = enqueued_dir / Path(stored_file_path).parent
                                 if enqueued_dir.exists():
                                     # SECURITY FIX: Validate that the file path is safe before processing
                                     # Only proceed if the original path validation passed
@@ -2112,6 +2118,18 @@ def create_document_routes(
             # Sanitize filename to prevent Path Traversal attacks
             safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
 
+            metadata = None
+            if project_id:
+                from lightrag.projects import ProjectManager
+
+                project = await ProjectManager(rag.project_metadata).get(project_id)
+                if project is None:
+                    raise HTTPException(status_code=404, detail="Project not found")
+                metadata = {
+                    "project_id": project_id,
+                    "storage_file_path": f"{project.project_id}/{safe_filename}",
+                }
+
             if not doc_manager.is_supported_file(safe_filename):
                 raise HTTPException(
                     status_code=400,
@@ -2119,7 +2137,14 @@ def create_document_routes(
                 )
 
             # Check if filename already exists in doc_status storage
-            existing_doc_data = await rag.doc_status.get_doc_by_file_path(safe_filename)
+            from lightrag.projects.service import get_project_documents
+
+            documents, _ = await get_project_documents(rag.doc_status, project_id or None)
+            existing_doc_data = next(
+                (doc.__dict__ for _, doc in documents
+                 if doc.file_path == safe_filename
+                 and (doc.metadata or {}).get("project_id") == (project_id or None)), None,
+            )
             if existing_doc_data:
                 # Get document status and track_id from existing document
                 status = existing_doc_data.get("status", "unknown")
@@ -2131,7 +2156,9 @@ def create_document_routes(
                     track_id=existing_track_id,
                 )
 
-            file_path = doc_manager.input_dir / safe_filename
+            relative_path = metadata["storage_file_path"] if metadata else safe_filename
+            file_path = doc_manager.input_dir / relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
             # Check if file already exists in file system
             if file_path.exists():
                 return InsertResponse(
@@ -2140,13 +2167,15 @@ def create_document_routes(
                     track_id="",
                 )
 
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+            try:
+                with open(file_path, "xb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+            except FileExistsError:
+                return InsertResponse(status="duplicated", message="File is already being uploaded", track_id="")
 
             track_id = generate_track_id("upload")
 
             # Build metadata with project_id if provided
-            metadata = {"project_id": project_id} if project_id else None
             logger.info(f"Uploading file '{safe_filename}' with project_id={project_id}, metadata={metadata}")
 
             # Add to background tasks and get track_id
@@ -2158,6 +2187,8 @@ def create_document_routes(
                 track_id=track_id,
             )
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error /documents/upload: {file.filename}: {str(e)}")
             logger.error(traceback.format_exc())
@@ -3311,7 +3342,7 @@ def create_document_routes(
                 )
 
             # Get file path from document data
-            file_path = doc_data.get("file_path", "")
+            file_path = (doc_data.get("metadata") or {}).get("storage_file_path") or doc_data.get("file_path", "")
             if not file_path:
                 raise HTTPException(
                     status_code=404,
@@ -3428,7 +3459,7 @@ def create_document_routes(
                 )
 
             # Get file path from document data
-            file_path = doc_data.get("file_path", "")
+            file_path = (doc_data.get("metadata") or {}).get("storage_file_path") or doc_data.get("file_path", "")
             if not file_path:
                 raise HTTPException(
                     status_code=404,
@@ -3679,7 +3710,7 @@ def create_document_routes(
                 )
 
             # Get file path from document data
-            file_path = doc_data.get("file_path", "")
+            file_path = (doc_data.get("metadata") or {}).get("storage_file_path") or doc_data.get("file_path", "")
             if not file_path:
                 raise HTTPException(
                     status_code=404,

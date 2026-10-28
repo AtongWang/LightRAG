@@ -255,8 +255,16 @@ export const searchNodes = async (params: {
   entityTypes?: string[]
   limit?: number
 }): Promise<any[]> => {
-  const response = await api.get('/entities/search', { params })
-  return response.data
+  const response = await api.get('/entities/search', {
+    params: {
+      project_id: params.projectId,
+      query: params.query,
+      entity_types: params.entityTypes,
+      limit: params.limit
+    },
+    paramsSerializer: { indexes: null }
+  })
+  return response.data.entities
 }
 
 // ==================== 导出API对象 ====================

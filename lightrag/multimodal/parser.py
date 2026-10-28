@@ -475,11 +475,19 @@ class EnhancedMultimodalParser:
             包含各解析器状态的字典
         """
         status = {
+            "mineru_cloud": False,
             "mineru_api": False,
             "mineru_local": False,
             "raganything": False,
             "recommended": None,
         }
+
+        if self.parser_type == "mineru_cloud":
+            pipeline = await self._get_pipeline()
+            available, _ = await pipeline.check_parser_availability()
+            status["mineru_cloud"] = available
+            status["recommended"] = "mineru_cloud" if available else None
+            return status
 
         # 检查 MinerU API
         try:
@@ -487,7 +495,7 @@ class EnhancedMultimodalParser:
             from lightrag.parsers.mineru_api import MineruAPIConfig
 
             config = MineruAPIConfig(api_url=self.mineru_api_url)
-            parser = MineruAPIParser(config)
+            parser = MineruAPIParser(config=config)
             # check_availability is sync, not async
             status["mineru_api"] = parser.check_availability()
         except Exception as e:

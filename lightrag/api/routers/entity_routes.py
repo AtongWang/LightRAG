@@ -53,6 +53,22 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
     # Create combined auth dependency
     combined_auth = get_combined_auth_dependency(api_key)
 
+    async def get_nodes(project_id: str | None):
+        nodes = await rag.chunk_entity_relation_graph.get_all_nodes()
+        if not project_id:
+            return nodes, None, None
+        from lightrag.constants import GRAPH_FIELD_SEP
+        from lightrag.projects import ProjectManager
+        from lightrag.projects.service import get_project_documents
+
+        project = await ProjectManager(rag.project_metadata).get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        documents, _ = await get_project_documents(rag.doc_status, project_id)
+        chunks = {chunk for _, doc in documents for chunk in doc.chunks_list or []}
+        nodes = [node for node in nodes if chunks.intersection(node.get("source_id", "").split(GRAPH_FIELD_SEP))]
+        return nodes, project.workspace, chunks
+
     # Note: Static routes (like /search, /stats) must be defined BEFORE dynamic routes (like /{entity_id})
     # otherwise FastAPI will treat "search" and "stats" as entity_id values
 
@@ -63,8 +79,8 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
     async def search_entities(
         query: Optional[str] = Query(None, description="搜索关键词"),
         entity_types: Optional[List[str]] = Query(None, description="实体类型过滤"),
-        limit: int = Query(10, description="返回数量限制"),
-        offset: int = Query(0, description="偏移量"),
+        limit: int = Query(10, ge=1, le=1000, description="返回数量限制"),
+        offset: int = Query(0, ge=0, description="偏移量"),
         project_id: Optional[str] = Query(None, description="项目ID（用于workspace过滤）")
     ):
         """搜索实体
@@ -72,32 +88,8 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
         根据关键词和类型搜索实体。
         """
         try:
-            graph_storage = rag.graph_storage
+            all_nodes, _, _ = await get_nodes(project_id)
 
-            # 如果指定了project_id，使用对应的workspace
-            from lightrag.projects import ProjectManager
-            from lightrag.kg.shared_storage import get_namespace_data
-
-            workspace = None
-            if project_id:
-                # 获取项目的workspace
-                kv_storage = rag.llm_response_cache
-                project_manager = ProjectManager(kv_storage)
-                project = await project_manager.get(project_id)
-                if project:
-                    workspace = project.workspace
-
-            # 从图谱存储获取所有节点
-            # 注意：不同的graph_storage实现可能有不同的方法
-            try:
-                # 尝试使用get_all_nodes方法
-                all_nodes = await graph_storage.get_all_nodes(workspace)
-            except AttributeError:
-                # 如果没有get_all_nodes，使用其他方法
-                all_nodes = []
-                # 这需要根据具体的graph_storage实现来处理
-
-            # 过滤节点
             filtered_nodes = []
             for node in all_nodes:
                 # 类型过滤
@@ -106,7 +98,7 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
 
                 # 关键词过滤
                 if query:
-                    entity_name = node.get("entity_name", "").lower()
+                    entity_name = node.get("entity_name", node.get("id", "")).lower()
                     description = node.get("description", "").lower()
                     if query.lower() not in entity_name and query.lower() not in description:
                         continue
@@ -124,6 +116,8 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
                 "offset": offset
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             from lightrag.utils import logger
             logger.error(f"Error searching entities: {e}")
@@ -141,30 +135,18 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
         返回指定项目或全局的实体统计数据。
         """
         try:
-            graph_storage = rag.graph_storage
+            from lightrag.constants import GRAPH_FIELD_SEP
 
-            # 如果指定了project_id，使用对应的workspace
-            workspace = None
-            if project_id:
-                from lightrag.projects import ProjectManager
-                kv_storage = rag.llm_response_cache
-                project_manager = ProjectManager(kv_storage)
-                project = await project_manager.get(project_id)
-                if project:
-                    workspace = project.workspace
-
-            # 获取节点数量
-            try:
-                node_count = await graph_storage.get_node_count(workspace)
-            except AttributeError:
-                # 如果没有get_node_count方法，使用其他方法
-                node_count = 0
-
-            # 获取边数量
-            try:
-                edge_count = await graph_storage.get_edge_count(workspace)
-            except AttributeError:
-                edge_count = 0
+            nodes, workspace, chunks = await get_nodes(project_id)
+            edges = await rag.chunk_entity_relation_graph.get_all_edges()
+            if chunks is not None:
+                node_ids = {node.get("id", node.get("entity_name", "")) for node in nodes}
+                edges = [edge for edge in edges
+                         if edge.get("source", edge.get("src_id")) in node_ids
+                         and edge.get("target", edge.get("tgt_id")) in node_ids
+                         and chunks.intersection(edge.get("source_id", "").split(GRAPH_FIELD_SEP))]
+            node_count = len(nodes)
+            edge_count = len(edges)
 
             return {
                 "node_count": node_count,
@@ -173,6 +155,8 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
                 "workspace": workspace
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             from lightrag.utils import logger
             logger.error(f"Error getting entity stats: {e}")
@@ -190,7 +174,7 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
         """
         try:
             # 从图谱存储中获取实体
-            graph_storage = rag.graph_storage
+            graph_storage = rag.chunk_entity_relation_graph
 
             # 获取节点数据
             node_data = await graph_storage.get_node(entity_id)
@@ -229,7 +213,7 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
         更新实体的类型、描述或属性。
         """
         try:
-            graph_storage = rag.graph_storage
+            graph_storage = rag.chunk_entity_relation_graph
 
             # 获取现有实体
             existing = await graph_storage.get_node(entity_id)
@@ -250,15 +234,9 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
                 update_data.update(request.attributes)
 
             # 更新节点
-            await graph_storage.upsert_node(
-                entity_id,
-                entity_type=update_data.get("entity_type", "unknown"),
-                entity_name=update_data.get("entity_name", entity_id),
-                description=update_data.get("description", ""),
-                source_id=update_data.get("source_id", entity_id),
-                **{k: v for k, v in update_data.items()
-                   if k not in ["entity_type", "entity_name", "description", "source_id"]}
-            )
+            if request.source_id is not None:
+                update_data["source_id"] = request.source_id
+            update_data = await rag.aedit_entity(entity_id, update_data, allow_rename=False)
 
             return {
                 "message": f"Entity '{entity_id}' updated successfully",
@@ -282,7 +260,7 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
         删除指定的实体及其相关的所有边。
         """
         try:
-            graph_storage = rag.graph_storage
+            graph_storage = rag.chunk_entity_relation_graph
 
             # 检查实体是否存在
             existing = await graph_storage.get_node(entity_id)
@@ -293,7 +271,9 @@ def create_entity_router(rag: LightRAG, api_key: str) -> APIRouter:
                 )
 
             # 删除节点（会自动删除相关的边）
-            await graph_storage.delete_node(entity_id)
+            result = await rag.adelete_by_entity(entity_id)
+            if result.status != "success":
+                raise HTTPException(status_code=500, detail="Entity deletion failed")
 
             return {
                 "message": f"Entity '{entity_id}' deleted successfully"

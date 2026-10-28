@@ -78,11 +78,9 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         try:
             docs_list = []
             try:
-                docs_list, total_docs = await rag.doc_status.get_docs_paginated(
-                    project_id=project.project_id,
-                    page=1,
-                    page_size=10000,
-                )
+                from lightrag.projects.service import get_project_documents
+
+                docs_list, total_docs = await get_project_documents(rag.doc_status, project.project_id)
                 stats.document_count = total_docs
             except Exception as e:
                 logger.warning(f"Failed to get document count for project {project.project_id}: {e}")
@@ -148,7 +146,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         创建一个新的项目，自动分配唯一的 project_id 和 workspace。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             project = await project_manager.create(
@@ -174,7 +172,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         根据 ID 获取项目信息。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             project = await project_manager.get(project_id)
@@ -199,7 +197,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         获取所有项目的列表。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             projects = await project_manager.list_all()
@@ -223,7 +221,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         更新项目的基本信息（名称、描述）。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             # 使用新的update方法
@@ -256,7 +254,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         删除指定的项目及其关联的本体。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             # 检查项目是否存在
@@ -287,7 +285,7 @@ def create_project_router(rag: LightRAG, api_key: str) -> APIRouter:
         为项目指定关联的本体 ID。
         """
         try:
-            kv_storage = rag.llm_response_cache
+            kv_storage = rag.project_metadata
             project_manager = ProjectManager(kv_storage)
 
             # 检查项目是否存在

@@ -2940,6 +2940,7 @@ async def extract_entities(
     llm_response_cache: BaseKVStorage | None = None,
     text_chunks_storage: BaseKVStorage | None = None,
     doc_status_storage: Any | None = None,
+    project_metadata: BaseKVStorage | None = None,
 ) -> list:
     # Check for cancellation at the start of entity extraction
     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -2966,9 +2967,7 @@ async def extract_entities(
     allowed_entity_types: set[str] | None = None
     allowed_relation_types: set[str] | None = None
     allowed_relation_type_compact_map: dict[str, str] = {}
-    # IMPORTANT: global_config['kv_storage'] is a storage class name (str), not an instance.
-    # Use llm_response_cache (a real BaseKVStorage instance) for ontology/project CRUD.
-    kv_storage_instance = llm_response_cache
+    kv_storage_instance = project_metadata
     ontology_id = global_config["addon_params"].get("ontology_id")
     project_id = global_config["addon_params"].get("project_id")
 
@@ -3597,6 +3596,9 @@ async def kg_query(
         ll_keywords_str,
         query_param.user_prompt or "",
         query_param.enable_rerank,
+        sys_prompt,
+        query_param.conversation_history,
+        sorted(query_param.chunk_ids) if query_param.chunk_ids is not None else None,
     )
 
     cached_result = await handle_cache(
@@ -3808,6 +3810,24 @@ async def extract_keywords_only(
             )
 
     return hl_keywords, ll_keywords
+
+
+async def _enrich_chunk_metadata(chunks: list[dict], text_chunks_db: BaseKVStorage) -> None:
+    """Join stored chunk metadata by requested IDs, independent of backend ID fields."""
+    selected = [chunk for chunk in chunks if chunk.get("chunk_id")]
+    if not selected:
+        return
+    records = await text_chunks_db.get_by_ids([chunk["chunk_id"] for chunk in selected])
+    for chunk, record in zip(selected, records):
+        if not isinstance(record, dict):
+            continue
+        for key in (
+            "content", "file_path", "source_file", "page_idx", "description",
+            "is_multimodal", "modal_type", "asset_id", "asset_path", "table_html",
+            "table_markdown", "equation_latex",
+        ):
+            if record.get(key) is not None:
+                chunk[key] = record[key]
 
 
 async def _get_vector_context(
@@ -4409,47 +4429,8 @@ async def _merge_all_chunks(
         f"Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})"
     )
 
-    # Enrich merged chunks with full metadata (including multimodal fields)
     if merged_chunks and text_chunks_db:
-        try:
-            chunk_ids = [
-                chunk.get("chunk_id")
-                for chunk in merged_chunks
-                if chunk.get("chunk_id")
-            ]
-            if chunk_ids:
-                chunk_data_list = await text_chunks_db.get_by_ids(chunk_ids)
-                chunk_data_map = {}
-                for chunk_data in chunk_data_list:
-                    if not isinstance(chunk_data, dict):
-                        continue
-                    chunk_id = chunk_data.get("chunk_id") or chunk_data.get("id")
-                    if chunk_id:
-                        chunk_data_map[chunk_id] = chunk_data
-
-                for chunk in merged_chunks:
-                    chunk_id = chunk.get("chunk_id")
-                    if not chunk_id or chunk_id not in chunk_data_map:
-                        continue
-                    stored_chunk = chunk_data_map[chunk_id]
-                    for key in (
-                        "content",
-                        "file_path",
-                        "source_file",
-                        "page_idx",
-                        "description",
-                        "is_multimodal",
-                        "modal_type",
-                        "asset_id",
-                        "asset_path",
-                        "table_html",
-                        "table_markdown",
-                        "equation_latex",
-                    ):
-                        if key in stored_chunk and stored_chunk.get(key) is not None:
-                            chunk[key] = stored_chunk.get(key)
-        except Exception as e:
-            logger.debug(f"Failed to enrich merged chunks with metadata: {e}")
+        await _enrich_chunk_metadata(merged_chunks, text_chunks_db)
 
     return merged_chunks
 
@@ -5358,6 +5339,7 @@ async def naive_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     return_raw_data: Literal[True] = True,
+    text_chunks_db: BaseKVStorage | None = None,
 ) -> dict[str, Any]: ...
 
 
@@ -5370,6 +5352,7 @@ async def naive_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     return_raw_data: Literal[False] = False,
+    text_chunks_db: BaseKVStorage | None = None,
 ) -> str | AsyncIterator[str]: ...
 
 
@@ -5380,6 +5363,7 @@ async def naive_query(
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
+    text_chunks_db: BaseKVStorage | None = None,
 ) -> QueryResult | None:
     """
     Execute naive query and return unified QueryResult object.
@@ -5418,6 +5402,8 @@ async def naive_query(
         return QueryResult(content=PROMPTS["fail_response"])
 
     chunks = await _get_vector_context(query, chunks_vdb, query_param, None)
+    if chunks and text_chunks_db:
+        await _enrich_chunk_metadata(chunks, text_chunks_db)
 
     if chunks is None or len(chunks) == 0:
         logger.info(
@@ -5554,6 +5540,9 @@ async def naive_query(
         query_param.max_total_tokens,
         query_param.user_prompt or "",
         query_param.enable_rerank,
+        sys_prompt,
+        query_param.conversation_history,
+        sorted(query_param.chunk_ids) if query_param.chunk_ids is not None else None,
     )
     cached_result = await handle_cache(
         hashing_kv, args_hash, user_query, query_param.mode, cache_type="query"

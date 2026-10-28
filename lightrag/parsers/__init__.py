@@ -9,6 +9,7 @@ from typing import Optional
 from .base import BaseParser, ParseResult, ContentBlock, ParserConfig
 from .mineru_api import MineruAPIParser, MineruAPIConfig
 from .mineru_local import MineruLocalParser
+from .mineru_cloud import MineruCloudParser
 
 
 def get_default_parser(
@@ -27,6 +28,10 @@ def get_default_parser(
     Returns:
         BaseParser instance or None if no parser available
     """
+    if parser_type == "mineru_cloud":
+        url = "https://mineru.net/api/v4" if mineru_api_url == "http://localhost:8000" else mineru_api_url
+        return MineruCloudParser(api_url=url, config=MineruAPIConfig(api_url=url, **kwargs))
+
     if parser_type == "mineru_api" or parser_type == "auto":
         try:
             config = MineruAPIConfig(api_url=mineru_api_url, **kwargs)
@@ -56,5 +61,6 @@ __all__ = [
     "MineruAPIParser",
     "MineruAPIConfig",
     "MineruLocalParser",
+    "MineruCloudParser",
     "get_default_parser",
 ]
