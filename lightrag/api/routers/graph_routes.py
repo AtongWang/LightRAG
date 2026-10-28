@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
+from lightrag.utils_graph import expand_relation_facts
 from ..utils_api import get_combined_auth_dependency
 
 router = APIRouter(tags=["graph"])
@@ -230,8 +231,12 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
                 # source_id may contain multiple chunk IDs separated by GRAPH_FIELD_SEP
                 node_chunk_ids = set(cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip())
                 # Check if any of the node's chunks belong to the project
-                return bool(node_chunk_ids & project_chunk_ids)
+                return node.get("project_id") == project_id and bool(node_chunk_ids & project_chunk_ids)
 
+            rebuild_required = any(
+                not node.get("project_id") and project_chunk_ids.intersection(node.get("source_id", "").split(GRAPH_FIELD_SEP))
+                for node in all_nodes
+            )
             filtered_nodes = [node for node in all_nodes if node_belongs_to_project(node)]
 
             # Create a set of node IDs for edge filtering
@@ -281,8 +286,9 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
             return {
                 "nodes": filtered_nodes,
-                "edges": filtered_edges,
-                "is_truncated": is_truncated
+                "edges": [fact for edge in filtered_edges for fact in expand_relation_facts(edge)],
+                "is_truncated": is_truncated,
+                "rebuild_required": rebuild_required,
             }
 
         except HTTPException:
@@ -320,11 +326,22 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
                 f"get_knowledge_graph called with label: '{label}' (length: {len(label)}, repr: {repr(label)})"
             )
 
-            return await rag.get_knowledge_graph(
+            graph = await rag.get_knowledge_graph(
                 node_label=label,
                 max_depth=max_depth,
                 max_nodes=max_nodes,
             )
+            from lightrag.types import KnowledgeGraphEdge
+
+            graph.edges = [
+                KnowledgeGraphEdge(
+                    id=fact.get("id", edge.id),
+                    source=fact.get("source", edge.source), target=fact.get("target", edge.target),
+                    type="DIRECTED" if fact["direction_known"] else "UNDIRECTED", properties=fact,
+                )
+                for edge in graph.edges for fact in expand_relation_facts(edge.properties)
+            ]
+            return graph
         except Exception as e:
             logger.error(f"Error getting knowledge graph for label '{label}': {str(e)}")
             logger.error(traceback.format_exc())

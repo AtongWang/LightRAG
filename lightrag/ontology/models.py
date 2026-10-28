@@ -3,7 +3,7 @@
 定义 OntologySpec 数据结构和相关的验证结果。
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -22,6 +22,7 @@ class OntologySpec:
     relation_types: List[str]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    relation_constraints: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.created_at is None:

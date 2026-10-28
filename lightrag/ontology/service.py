@@ -8,9 +8,14 @@ from datetime import datetime
 
 from ..utils import logger
 from ..base import BaseKVStorage
+from ..kg.shared_storage import get_storage_keyed_lock
 from .models import OntologySpec
 from .validator import OntologyValidator
 from .prompts import OntologyPromptInjector
+
+
+class OntologyVersionConflict(ValueError):
+    """A writer tried to replace a newer ontology definition."""
 
 
 class OntologyService:
@@ -18,8 +23,6 @@ class OntologyService:
 
     def __init__(self, kv_storage: BaseKVStorage):
         self.kv = kv_storage
-        self._cache: Dict[str, OntologySpec] = {}
-        self._cache_ttl: int = 3600  # 1 小时
         self.prompt_injector = OntologyPromptInjector()
 
     def _sanitize_spec_dict(self, spec_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -27,6 +30,10 @@ class OntologyService:
         return {key: value for key, value in spec_dict.items() if key in allowed_keys}
 
     async def create(self, spec: OntologySpec, force: bool = False) -> OntologySpec:
+        async with get_storage_keyed_lock([spec.project_id], namespace=f"{self.kv.workspace}:ontology"):
+            return await self._create(spec, force)
+
+    async def _create(self, spec: OntologySpec, force: bool = False) -> OntologySpec:
         """创建本体
 
         Args:
@@ -40,15 +47,17 @@ class OntologyService:
 
         # 检查是否已存在
         current_key = f"onto_{spec.project_id}"
+        project_key = f"project_{spec.project_id}"
+        project = await self.kv.get_by_id(project_key)
+        if project is None:
+            raise ValueError(f"Project '{spec.project_id}' not found")
         existing_data = await self.kv.get_by_id(current_key)
         if existing_data is not None:
             if not force:
                 raise ValueError(f"项目 {spec.project_id} 已有本体，请使用 update")
-            # Force mode: delete existing ontology first
             existing_spec = OntologySpec(
                 **self._sanitize_spec_dict(existing_data.get("spec", {}))
             )
-            await self.kv.delete([current_key, f"ontology_{existing_spec.ontology_id}"])
             logger.info(f"覆盖现有本体: {existing_spec.ontology_id}")
 
         # 准备存储数据
@@ -61,14 +70,22 @@ class OntologyService:
             {
                 current_key: ontology_data,
                 f"ontology_{spec.ontology_id}": ontology_data,
+                project_key: {**project, "ontology_id": spec.ontology_id},
             }
         )
 
         await self.kv.index_done_callback()
+        if existing_data is not None and existing_spec.ontology_id != spec.ontology_id:
+            await self.kv.delete([f"ontology_{existing_spec.ontology_id}"])
+            await self.kv.index_done_callback()
         logger.info(f"创建本体: {spec.ontology_id}, project: {spec.project_id}")
         return spec
 
     async def update(self, project_id: str, spec: OntologySpec) -> OntologySpec:
+        async with get_storage_keyed_lock([project_id], namespace=f"{self.kv.workspace}:ontology"):
+            return await self._update(project_id, spec)
+
+    async def _update(self, project_id: str, spec: OntologySpec) -> OntologySpec:
         """更新本体"""
         # 验证
         result = OntologyValidator.validate(spec)
@@ -85,11 +102,15 @@ class OntologyService:
         old_spec = OntologySpec(
             **self._sanitize_spec_dict(current_data.get("spec", {}))
         )
+        if spec.project_id != project_id or spec.ontology_id != old_spec.ontology_id:
+            raise ValueError("Ontology identity cannot change during update")
+        if spec.version != old_spec.version:
+            raise OntologyVersionConflict("Ontology changed concurrently; reload before updating")
         spec.version = self._increment_version(old_spec.version, "patch")
         spec.updated_at = datetime.utcnow().isoformat()
 
         # 保存历史版本（新 key）
-        history_key = f"onto_{project_id}_v{spec.version}"
+        history_key = f"onto_{project_id}_v{old_spec.version}"
         await self.kv.upsert(
             {
                 history_key: {
@@ -113,8 +134,6 @@ class OntologyService:
             }
         )
 
-        # 清除缓存
-        self._cache.pop(project_id, None)
         await self.kv.index_done_callback()
 
         logger.info(
@@ -124,10 +143,6 @@ class OntologyService:
 
     async def get_by_project(self, project_id: str) -> Optional[OntologySpec]:
         """获取项目的当前本体"""
-        # 检查缓存
-        if project_id in self._cache:
-            return self._cache[project_id]
-
         # 从 KV 加载
         key = f"onto_{project_id}"
         data = await self.kv.get_by_id(key)
@@ -138,8 +153,6 @@ class OntologyService:
         spec_dict = self._sanitize_spec_dict(data.get("spec", {}))
         spec = OntologySpec(**spec_dict)
 
-        # 写入缓存
-        self._cache[project_id] = spec
         return spec
 
     async def get(self, ontology_id: str) -> Optional[OntologySpec]:
@@ -157,6 +170,12 @@ class OntologyService:
         return spec
 
     async def delete(self, identifier: str):
+        ontology = await self.get(identifier) or await self.get_by_project(identifier)
+        project_id = ontology.project_id if ontology else identifier
+        async with get_storage_keyed_lock([project_id], namespace=f"{self.kv.workspace}:ontology"):
+            await self._delete(identifier)
+
+    async def _delete(self, identifier: str):
         """删除本体
 
         Args:
@@ -168,10 +187,12 @@ class OntologyService:
         if ontology:
             # 找到了，按 ontology_id 删除
             project_id = ontology.project_id
+            project_key = f"project_{project_id}"
+            project = await self.kv.get_by_id(project_key)
+            if project and project.get("ontology_id") == ontology.ontology_id:
+                await self.kv.upsert({project_key: {**project, "ontology_id": None}})
             keys_to_delete = [f"onto_{project_id}", f"ontology_{ontology.ontology_id}"]
             await self.kv.delete(keys_to_delete)
-            # 清除缓存
-            self._cache.pop(project_id, None)
             logger.info(
                 f"删除本体: ontology_id={ontology.ontology_id}, project_id={project_id}"
             )
@@ -182,10 +203,12 @@ class OntologyService:
 
             if ontology:
                 keys_to_delete.append(f"ontology_{ontology.ontology_id}")
+                project_key = f"project_{identifier}"
+                project = await self.kv.get_by_id(project_key)
+                if project and project.get("ontology_id") == ontology.ontology_id:
+                    await self.kv.upsert({project_key: {**project, "ontology_id": None}})
 
             await self.kv.delete(keys_to_delete)
-            # 清除缓存
-            self._cache.pop(identifier, None)
             logger.info(f"删除本体: project_id={identifier}")
 
         await self.kv.index_done_callback()

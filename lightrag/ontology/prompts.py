@@ -4,6 +4,7 @@
 """
 
 from typing import Dict
+import json
 from .models import OntologySpec
 
 
@@ -32,6 +33,7 @@ class OntologyPromptInjector:
                 "---Ontology (Injected)---\n"
                 f"本体名称: {spec.name}\n"
                 f"本体版本: {spec.version}\n"
+                f"关系端点约束: {json.dumps(spec.relation_constraints, ensure_ascii=False)}\n"
                 "\n"
                 "实体类型(entity_types)必须从下列列表中选择：\n"
                 f"{', '.join(spec.entity_types)}\n"
@@ -46,6 +48,7 @@ class OntologyPromptInjector:
             "---Ontology (Injected)---\n"
             f"Ontology Name: {spec.name}\n"
             f"Ontology Version: {spec.version}\n"
+            f"Relation endpoint constraints: {json.dumps(spec.relation_constraints, ensure_ascii=False)}\n"
             "\n"
             "Entity types (entity_types) must be chosen from:\n"
             f"{', '.join(spec.entity_types)}\n"

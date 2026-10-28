@@ -1646,6 +1646,7 @@ class LightRAG:
                 inserting_chunks[chunk_key] = {
                     "content": chunk_data["content"],
                     "full_doc_id": doc_key,
+                    "project_id": (metadata or {}).get("project_id", ""),
                     "tokens": tokens,
                     "chunk_order_index": index,
                     "file_path": display_file_name,
@@ -1671,6 +1672,7 @@ class LightRAG:
                     inserting_chunks[chunk_key] = {
                         "content": chunk_content,
                         "full_doc_id": doc_key,
+                        "project_id": (metadata or {}).get("project_id", ""),
                         "tokens": tokens,
                         "chunk_order_index": base_index + i,
                         "file_path": display_file_name,
@@ -2440,6 +2442,7 @@ class LightRAG:
                                 ): {
                                     **dp,
                                     "full_doc_id": doc_id,
+                                    "project_id": status_doc.metadata.get("project_id", ""),
                                     "file_path": file_path,  # Add file path to each chunk
                                     "llm_cache_list": [],  # Initialize empty LLM cache list for each chunk
                                 }
@@ -4477,6 +4480,9 @@ class LightRAG:
             allow_merge,
             self.entity_chunks,
             self.relation_chunks,
+            text_chunks_storage=self.text_chunks,
+            full_entities_storage=self.full_entities,
+            full_relations_storage=self.full_relations,
         )
 
     def edit_entity(
@@ -4630,6 +4636,9 @@ class LightRAG:
             target_entity_data,
             self.entity_chunks,
             self.relation_chunks,
+            text_chunks_storage=self.text_chunks,
+            full_entities_storage=self.full_entities,
+            full_relations_storage=self.full_relations,
         )
 
     def merge_entities(

@@ -355,7 +355,7 @@ async def test_entity_search_and_counts_respect_project(rag, client):
     await rag.doc_status.upsert({doc_id: {**record, "chunks_list": ["chunk-a"]}})
     for name, source_id in (("A", "chunk-a"), ("B", "chunk-b")):
         await rag.chunk_entity_relation_graph.upsert_node(
-            name, {"source_id": source_id, "entity_type": "Other"}
+            name, {"source_id": source_id, "entity_type": "Other", "project_id": project.project_id if name == "A" else "other"}
         )
     response = await client.get(
         "/entities/search", params={"project_id": project.project_id}

@@ -17,6 +17,7 @@ import { OntologyImportDialog } from './OntologyImportDialog'
 import { Save, CheckCircle2, AlertCircle, Download, Upload, Eye, Plus, Trash2 } from 'lucide-react'
 import { importOntology } from '@/api/ontology'
 import type { OntologySpec } from '@/types/ontology'
+import { editOntologyType } from '@/utils/ontology'
 
 interface OntologyEditorProps {
   projectId: string
@@ -74,10 +75,12 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     setIsSaving(true)
     try {
       await updateOntology(workingOntology.ontology_id, {
+        version: workingOntology.version,
         name: workingOntology.name,
         description: workingOntology.description,
         entity_types: workingOntology.entity_types,
-        relation_types: workingOntology.relation_types
+        relation_types: workingOntology.relation_types,
+        relation_constraints: workingOntology.relation_constraints
       })
       setHasChanges(false)
       setValidationResult({
@@ -179,7 +182,8 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       description: workingOntology.description,
       language: workingOntology.language,
       entity_types: workingOntology.entity_types,
-      relation_types: workingOntology.relation_types
+      relation_types: workingOntology.relation_types,
+      relation_constraints: workingOntology.relation_constraints
     }
     const dataStr = JSON.stringify(exportData, null, 2)
     const dataBlob = new Blob([dataStr], { type: 'application/json' })
@@ -200,29 +204,19 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     setHasChanges(true)
   }
 
-  const handleEditEntityType = (oldName: string, newName: string) => {
+  const handleTypeEdit = (field: 'entity_types' | 'relation_types', oldName: string, newName?: string) => {
     if (!workingOntology) return
-
-    const updatedEntityTypes = workingOntology.entity_types.map(type =>
-      type === oldName ? newName : type
-    )
-
-    setWorkingOntology({
-      ...workingOntology,
-      entity_types: updatedEntityTypes
-    })
-    setHasChanges(true)
+    try {
+      setWorkingOntology(editOntologyType(workingOntology, field, oldName, newName))
+      setHasChanges(true)
+      setValidationResult(null)
+    } catch (error) {
+      setValidationResult({ isValid: false, error: error instanceof Error ? error.message : String(error) })
+    }
   }
 
-  const handleDeleteEntityType = (name: string) => {
-    if (!workingOntology) return
-
-    setWorkingOntology({
-      ...workingOntology,
-      entity_types: workingOntology.entity_types.filter(type => type !== name)
-    })
-    setHasChanges(true)
-  }
+  const handleEditEntityType = (oldName: string, newName: string) => handleTypeEdit('entity_types', oldName, newName)
+  const handleDeleteEntityType = (name: string) => handleTypeEdit('entity_types', name)
 
   const handleAddRelationType = (name: string) => {
     if (!workingOntology) return
@@ -233,29 +227,8 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     setHasChanges(true)
   }
 
-  const handleEditRelationType = (oldName: string, newName: string) => {
-    if (!workingOntology) return
-
-    const updatedRelationTypes = workingOntology.relation_types.map(type =>
-      type === oldName ? newName : type
-    )
-
-    setWorkingOntology({
-      ...workingOntology,
-      relation_types: updatedRelationTypes
-    })
-    setHasChanges(true)
-  }
-
-  const handleDeleteRelationType = (name: string) => {
-    if (!workingOntology) return
-
-    setWorkingOntology({
-      ...workingOntology,
-      relation_types: workingOntology.relation_types.filter(type => type !== name)
-    })
-    setHasChanges(true)
-  }
+  const handleEditRelationType = (oldName: string, newName: string) => handleTypeEdit('relation_types', oldName, newName)
+  const handleDeleteRelationType = (name: string) => handleTypeEdit('relation_types', name)
 
   // Handler for creating new ontology
   const handleCreateOntology = async () => {

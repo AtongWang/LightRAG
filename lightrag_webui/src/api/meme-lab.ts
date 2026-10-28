@@ -210,6 +210,7 @@ export const getProjectGraph = async (projectId: string, options?: {
 }): Promise<{
   nodes: any[]
   edges: any[]
+  rebuild_required?: boolean
 }> => {
   const params = new URLSearchParams()
   if (options?.maxDepth) params.set('max_depth', String(options.maxDepth))

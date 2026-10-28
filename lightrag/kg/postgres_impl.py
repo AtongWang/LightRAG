@@ -1366,6 +1366,9 @@ class PostgreSQLDB:
             )
 
         # Migrate text chunks to add llm_cache_list field if needed
+        await self.execute(
+            "ALTER TABLE LIGHTRAG_DOC_CHUNKS ADD COLUMN IF NOT EXISTS chunk_metadata JSONB NOT NULL DEFAULT '{}'::jsonb"
+        )
         try:
             await self._migrate_text_chunks_add_llm_cache_list()
         except Exception as e:
@@ -1917,6 +1920,8 @@ class PGKVStorage(BaseKVStorage):
         response = await self.db.query(sql, list(params.values()))
 
         if response and is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
+            metadata = response.pop("chunk_metadata", {}) or {}
+            response.update(json.loads(metadata) if isinstance(metadata, str) else metadata)
             # Parse llm_cache_list JSON string back to list
             llm_cache_list = response.get("llm_cache_list", [])
             if isinstance(llm_cache_list, str):
@@ -2052,6 +2057,8 @@ class PGKVStorage(BaseKVStorage):
         if results and is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
             # Parse llm_cache_list JSON string back to list for each result
             for result in results:
+                metadata = result.pop("chunk_metadata", {}) or {}
+                result.update(json.loads(metadata) if isinstance(metadata, str) else metadata)
                 llm_cache_list = result.get("llm_cache_list", [])
                 if isinstance(llm_cache_list, str):
                     try:
@@ -2201,6 +2208,10 @@ class PGKVStorage(BaseKVStorage):
                     "content": v["content"],
                     "file_path": v["file_path"],
                     "llm_cache_list": json.dumps(v.get("llm_cache_list", [])),
+                    "chunk_metadata": json.dumps({key: value for key, value in v.items() if key not in {
+                        "id", "tokens", "chunk_order_index", "full_doc_id", "content", "file_path",
+                        "llm_cache_list", "create_time", "update_time", "workspace",
+                    }}),
                     "create_time": current_time,
                     "update_time": current_time,
                 }
@@ -5487,6 +5498,7 @@ TABLES = {
                     content TEXT,
                     file_path TEXT NULL,
                     llm_cache_list JSONB NULL DEFAULT '[]'::jsonb,
+                    chunk_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
 	                CONSTRAINT LIGHTRAG_DOC_CHUNKS_PK PRIMARY KEY (workspace, id)
@@ -5622,6 +5634,7 @@ SQL_TEMPLATES = {
                                 FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id=$2
                             """,
     "get_by_id_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
+                                chunk_metadata,
                                 chunk_order_index, full_doc_id, file_path,
                                 COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
@@ -5638,6 +5651,7 @@ SQL_TEMPLATES = {
                                  FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id = ANY($2)
                             """,
     "get_by_ids_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
+                                  chunk_metadata,
                                   chunk_order_index, full_doc_id, file_path,
                                   COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
                                   EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
@@ -5708,9 +5722,9 @@ SQL_TEMPLATES = {
                                       update_time = CURRENT_TIMESTAMP
                                      """,
     "upsert_text_chunk": """INSERT INTO LIGHTRAG_DOC_CHUNKS (workspace, id, tokens,
-                      chunk_order_index, full_doc_id, content, file_path, llm_cache_list,
+                      chunk_order_index, full_doc_id, content, file_path, llm_cache_list, chunk_metadata,
                       create_time, update_time)
-                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET tokens=EXCLUDED.tokens,
                       chunk_order_index=EXCLUDED.chunk_order_index,
@@ -5718,6 +5732,7 @@ SQL_TEMPLATES = {
                       content = EXCLUDED.content,
                       file_path=EXCLUDED.file_path,
                       llm_cache_list=EXCLUDED.llm_cache_list,
+                      chunk_metadata=EXCLUDED.chunk_metadata,
                       update_time = EXCLUDED.update_time
                      """,
     "upsert_full_entities": """INSERT INTO LIGHTRAG_FULL_ENTITIES (workspace, id, entity_names, count,

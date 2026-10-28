@@ -245,9 +245,9 @@ async def test_pdf_parser_multimodal_graph_answer_and_asset_http(
         )
         assert count == 1 and docs[0][1].status.value == "processed", docs
         assert calls and "vision" in models.stages and "extraction" in models.stages
-        assert await rag.chunk_entity_relation_graph.has_edge(
-            "Bronze Vessel", "Heritage Museum"
-        )
+        nodes = await rag.chunk_entity_relation_graph.get_all_nodes()
+        by_name = {node.get("display_name"): node["id"] for node in nodes}
+        assert await rag.chunk_entity_relation_graph.has_edge(by_name["Bronze Vessel"], by_name["Heritage Museum"])
         with patch("sys.argv", ["lightrag-server"]):
             from lightrag.api.routers.multimodal_routes import create_multimodal_routes
             from lightrag.api.routers.query_routes import create_query_routes

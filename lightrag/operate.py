@@ -51,6 +51,7 @@ from lightrag.base import (
 )
 from lightrag.prompt import PROMPTS
 from lightrag.ontology import OntologyService, OntologyPromptInjector
+from lightrag.utils_graph import entity_display_name, merge_relation_facts, scope_extraction
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -74,6 +75,17 @@ from dotenv import load_dotenv
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False)
+
+
+def _merge_extraction_records(original: list[dict], additional: list[dict]) -> list[dict]:
+    records = {}
+    for entry in [*original, *additional]:
+        key = tuple(entry.get(field, "") for field in (
+            "entity_name", "entity_type", "src_id", "tgt_id", "relation_type", "source_id"
+        ))
+        if key not in records or len(entry.get("description", "")) > len(records[key].get("description", "")):
+            records[key] = entry
+    return list(records.values())
 
 
 def _truncate_entity_identifier(
@@ -609,6 +621,10 @@ async def rebuild_knowledge_from_chunks(
         all_referenced_chunk_ids,
         text_chunks_storage=text_chunks_storage,
     )
+    for chunk_id in all_referenced_chunk_ids:
+        chunk = await text_chunks_storage.get_by_id(chunk_id)
+        if chunk and "extraction" in chunk:
+            cached_results[chunk_id] = [("", 0)]
 
     if not cached_results:
         status_message = "No cached extraction results found, cannot rebuild"
@@ -1072,6 +1088,11 @@ async def _rebuild_from_extraction_result(
 
     # Get chunk data for file_path from storage
     chunk_data = await text_chunks_storage.get_by_id(chunk_id)
+    if chunk_data and "extraction" in chunk_data:
+        extraction = chunk_data["extraction"]
+        return extraction["nodes"], {
+            (edge["src_id"], edge["tgt_id"]): edge["entries"] for edge in extraction["edges"]
+        }
     file_path = (
         chunk_data.get("file_path", "unknown_source")
         if chunk_data
@@ -1079,7 +1100,7 @@ async def _rebuild_from_extraction_result(
     )
 
     # Call the shared processing function
-    return await _process_extraction_result(
+    nodes, edges = await _process_extraction_result(
         extraction_result,
         chunk_id,
         timestamp,
@@ -1087,6 +1108,7 @@ async def _rebuild_from_extraction_result(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
     )
+    return scope_extraction(nodes, edges, (chunk_data or {}).get("project_id"))
 
 
 async def _rebuild_single_entity(
@@ -1476,6 +1498,10 @@ async def _rebuild_single_relationship(
     # Update relationship in graph storage
     updated_relationship_data = {
         **current_relationship,
+        "relation_facts": merge_relation_facts(all_relationship_data),
+        "relation_type": GRAPH_FIELD_SEP.join(sorted({
+            entry["relation_type"] for entry in all_relationship_data if entry.get("relation_type")
+        })),
         "description": final_description
         if final_description
         else current_relationship.get("description", ""),
@@ -1969,6 +1995,7 @@ async def _merge_nodes_then_upsert(
     # 12. Update both graph and vector db
     node_data = dict(
         entity_id=entity_name,
+        display_name=next((entry["display_name"] for entry in nodes_data if entry.get("display_name")), entity_display_name(entity_name)),
         entity_type=entity_type,
         description=description,
         source_id=source_id,
@@ -1977,6 +2004,10 @@ async def _merge_nodes_then_upsert(
         truncate=truncation_info,
         **multimodal_attrs,  # Include multimodal attributes if present
     )
+    for key in ("project_id", "is_system"):
+        value = next((entry[key] for entry in nodes_data if key in entry), (already_node or {}).get(key))
+        if value is not None:
+            node_data[key] = value
     await knowledge_graph_inst.upsert_node(
         entity_name,
         node_data=node_data,
@@ -1984,7 +2015,7 @@ async def _merge_nodes_then_upsert(
     node_data["entity_name"] = entity_name
     if entity_vdb is not None:
         entity_vdb_id = compute_mdhash_id(str(entity_name), prefix="ent-")
-        entity_content = f"{entity_name}\n{description}"
+        entity_content = f"{node_data['display_name']}\n{description}"
         data_for_vdb = {
             entity_vdb_id: {
                 "entity_name": entity_name,
@@ -2187,7 +2218,10 @@ async def _merge_edges_then_upsert(
         if edge.get("relation_type"):
             all_relation_types.add(edge["relation_type"].strip())
     # Use first relation_type if available, otherwise empty string
-    relation_type = next(iter(all_relation_types)) if all_relation_types else ""
+    relation_type = GRAPH_FIELD_SEP.join(sorted(all_relation_types))
+    relation_facts = merge_relation_facts(
+        edges_data, (already_edge or {}).get("relation_facts", "[]"), set(source_ids)
+    )
 
     # 7. Deduplicate by description, keeping first occurrence in the same document
     unique_edges = {}
@@ -2505,6 +2539,7 @@ async def _merge_edges_then_upsert(
             created_at=edge_created_at,
             truncate=truncation_info,
             relation_type=relation_type,  # New field
+            relation_facts=relation_facts,
         ),
     )
 
@@ -2519,6 +2554,7 @@ async def _merge_edges_then_upsert(
         truncate=truncation_info,
         weight=weight,
         relation_type=relation_type,  # New field
+        relation_facts=relation_facts,
     )
 
     # Sort src_id and tgt_id to ensure consistent ordering (smaller string first)
@@ -2968,6 +3004,7 @@ async def extract_entities(
     allowed_relation_types: set[str] | None = None
     allowed_relation_type_compact_map: dict[str, str] = {}
     kv_storage_instance = project_metadata
+    ontology = None
     ontology_id = global_config["addon_params"].get("ontology_id")
     project_id = global_config["addon_params"].get("project_id")
 
@@ -2985,7 +3022,15 @@ async def extract_entities(
                 doc_metadata = (doc_status or {}).get("metadata") or {}
                 project_id = doc_metadata.get("project_id")
         except Exception as e:
-            logger.debug(f"Failed to infer project_id from doc_status metadata: {e}")
+            raise RuntimeError("Cannot determine project for ontology extraction") from e
+
+    chunk_projects = {chunk.get("project_id", project_id) for _, chunk in ordered_chunks}
+    if len(chunk_projects) > 1:
+        raise ValueError("Extract each project's chunks separately")
+    if chunk_projects:
+        project_id = next(iter(chunk_projects)) or project_id
+    if (ontology_id or project_id) and kv_storage_instance is None:
+        raise ValueError("Project metadata is required for ontology extraction")
 
     if kv_storage_instance and (ontology_id or project_id):
         try:
@@ -2994,18 +3039,28 @@ async def extract_entities(
 
             # Get ontology_id from project if needed
             effective_ontology_id = ontology_id
-            if project_id and not ontology_id:
+            if project_id:
                 from lightrag.projects import ProjectManager
 
                 project_manager = ProjectManager(kv_storage_instance)
                 project = await project_manager.get(project_id)
-                if project:
-                    effective_ontology_id = project.ontology_id
+                if project is None:
+                    raise ValueError(f"Project '{project_id}' not found for ontology extraction")
+                effective_ontology_id = ontology_id or project.ontology_id
 
             # Load and inject ontology
             if effective_ontology_id:
                 ontology = await ontology_service.get(effective_ontology_id)
+                if ontology is None:
+                    raise ValueError(f"Configured ontology '{effective_ontology_id}' not found")
+                if project_id and ontology.project_id != project_id:
+                    raise ValueError("Configured ontology belongs to another project")
                 if ontology:
+                    from lightrag.ontology import OntologyValidator
+
+                    validation = OntologyValidator.validate(ontology)
+                    if not validation.is_valid:
+                        raise ValueError(f"Invalid ontology: {validation.error_message}")
                     # Override entity_types and relation_types from ontology
                     entity_types = ontology.entity_types
                     relation_types = ontology.relation_types
@@ -3019,7 +3074,7 @@ async def extract_entities(
                         f"Loaded ontology '{effective_ontology_id}' with {len(entity_types)} entity types and {len(relation_types)} relation types"
                     )
         except Exception as e:
-            logger.warning(f"Failed to load ontology for extraction: {e}")
+            raise RuntimeError(f"Cannot load configured ontology: {e}") from e
 
     # Set default relation_types if not provided by ontology
     if relation_types is None:
@@ -3065,16 +3120,15 @@ async def extract_entities(
     ) -> str:
         if not allowed_types:
             return ""
-        for field in ("relation_type", "keywords", "description"):
+        for field in ("relation_type", "keywords"):
             raw_value = relation_data.get(field, "")
             normalized_value = (
                 _normalize_relation_type(str(raw_value)) if raw_value else ""
             )
             if not normalized_value:
                 continue
-            for allowed in allowed_types:
-                if allowed and allowed in normalized_value:
-                    return allowed
+            if normalized_value in allowed_types:
+                return normalized_value
             compact_value = normalized_value.replace("_", "")
             if compact_value in allowed_relation_type_compact_map:
                 return allowed_relation_type_compact_map[compact_value]
@@ -3096,6 +3150,7 @@ async def extract_entities(
                         str(entry.get("entity_type", ""))
                     )
                     if entry_type in allowed_entity_types:
+                        entry["entity_type"] = next(t for t in entity_types if _normalize_entity_type(t) == entry_type)
                         kept_entries.append(entry)
                 if kept_entries:
                     filtered_nodes[entity_name] = kept_entries
@@ -3129,6 +3184,19 @@ async def extract_entities(
                             entry["relation_type"] = inferred
                             relation_type = inferred
                     if relation_type in allowed_relation_types:
+                        constraints = {
+                            _normalize_relation_type(key): value
+                            for key, value in ontology.relation_constraints.items()
+                        }
+                        constraint = constraints.get(relation_type)
+                        if constraint:
+                            source_types = {_normalize_entity_type(e["entity_type"]) for e in filtered_nodes[src]}
+                            target_types = {_normalize_entity_type(e["entity_type"]) for e in filtered_nodes[tgt]}
+                            if not source_types.intersection({_normalize_entity_type(t) for t in constraint["source_types"]}):
+                                continue
+                            if not target_types.intersection({_normalize_entity_type(t) for t in constraint["target_types"]}):
+                                continue
+                        entry["relation_type"] = next(t for t in relation_types if _normalize_relation_type(t) == relation_type)
                         kept_entries.append(entry)
                 if kept_entries:
                     filtered_edges[edge_key] = kept_entries
@@ -3165,7 +3233,7 @@ async def extract_entities(
         return _normalize_multimodal_type(modal_type)
 
     def _pick_multimodal_relation_type() -> str:
-        return "related_to"
+        return "has_attachment"
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -3269,36 +3337,12 @@ async def extract_entities(
                 completion_delimiter=context_base["completion_delimiter"],
             )
 
-            # Merge results - compare description lengths to choose better version
+            # Keep distinct types and predicates when combining extraction rounds.
             for entity_name, glean_entities in glean_nodes.items():
-                if entity_name in maybe_nodes:
-                    # Compare description lengths and keep the better one
-                    original_desc_len = len(
-                        maybe_nodes[entity_name][0].get("description", "") or ""
-                    )
-                    glean_desc_len = len(glean_entities[0].get("description", "") or "")
-
-                    if glean_desc_len > original_desc_len:
-                        maybe_nodes[entity_name] = list(glean_entities)
-                    # Otherwise keep original version
-                else:
-                    # New entity from gleaning stage
-                    maybe_nodes[entity_name] = list(glean_entities)
+                maybe_nodes[entity_name] = _merge_extraction_records(maybe_nodes.get(entity_name, []), glean_entities)
 
             for edge_key, glean_edges in glean_edges.items():
-                if edge_key in maybe_edges:
-                    # Compare description lengths and keep the better one
-                    original_desc_len = len(
-                        maybe_edges[edge_key][0].get("description", "") or ""
-                    )
-                    glean_desc_len = len(glean_edges[0].get("description", "") or "")
-
-                    if glean_desc_len > original_desc_len:
-                        maybe_edges[edge_key] = list(glean_edges)
-                    # Otherwise keep original version
-                else:
-                    # New edge from gleaning stage
-                    maybe_edges[edge_key] = list(glean_edges)
+                maybe_edges[edge_key] = _merge_extraction_records(maybe_edges.get(edge_key, []), glean_edges)
 
         # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
@@ -3345,6 +3389,7 @@ async def extract_entities(
                     {
                         "entity_name": multimodal_entity_name,
                         "entity_type": multimodal_entity_type,
+                        "is_system": True,
                         "description": multimodal_description,
                         "source_id": chunk_key,
                         "file_path": file_path,
@@ -3358,14 +3403,14 @@ async def extract_entities(
                 for entity_name in maybe_nodes:
                     if entity_name == multimodal_entity_name:
                         continue
-                    relation_key = (multimodal_entity_name, entity_name)
+                    relation_key = (entity_name, multimodal_entity_name)
                     relation_description = (
                         f"{modal_type} content related to {entity_name}"
                     )
                     maybe_edges.setdefault(relation_key, []).append(
                         {
-                            "src_id": multimodal_entity_name,
-                            "tgt_id": entity_name,
+                            "src_id": entity_name,
+                            "tgt_id": multimodal_entity_name,
                             "weight": 1.0,
                             "description": relation_description,
                             "keywords": modal_type,
@@ -3373,6 +3418,7 @@ async def extract_entities(
                             "file_path": file_path,
                             "timestamp": timestamp,
                             "relation_type": relation_type,
+                            "is_system": True,
                         }
                     )
 
@@ -3387,6 +3433,19 @@ async def extract_entities(
                 pipeline_status["history_messages"].append(log_message)
 
         # Return the extracted nodes and edges for centralized processing
+        maybe_nodes, maybe_edges = scope_extraction(maybe_nodes, maybe_edges, project_id)
+        if text_chunks_storage is not None:
+            stored_chunk = await text_chunks_storage.get_by_id(chunk_key) or chunk_dp
+            await text_chunks_storage.upsert({chunk_key: {
+                **stored_chunk,
+                "project_id": project_id or "",
+                "extraction": {
+                    "ontology_id": ontology.ontology_id if ontology else "",
+                    "ontology_version": ontology.version if ontology else "",
+                    "nodes": maybe_nodes,
+                    "edges": [{"src_id": src, "tgt_id": tgt, "entries": entries} for (src, tgt), entries in maybe_edges.items()],
+                },
+            }})
         return maybe_nodes, maybe_edges
 
     # Get max async tasks limit from global_config
@@ -4066,7 +4125,7 @@ async def _perform_kg_search(
             entity_chunk_ids = set(
                 cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip()
             )
-            return bool(entity_chunk_ids & chunk_ids_set)
+            return bool(entity.get("project_id")) and bool(entity_chunk_ids & chunk_ids_set) and entity_chunk_ids <= chunk_ids_set
 
         filtered_entities = [e for e in final_entities if entity_matches_chunks(e)]
 
@@ -4080,7 +4139,12 @@ async def _perform_kg_search(
             relation_chunk_ids = set(
                 cid.strip() for cid in source_id.split(GRAPH_FIELD_SEP) if cid.strip()
             )
-            return bool(relation_chunk_ids & chunk_ids_set)
+            endpoints = relation.get("src_tgt") or (relation.get("src_id", ""), relation.get("tgt_id", ""))
+            return (
+                all(entity_display_name(name) != name for name in endpoints)
+                and bool(relation_chunk_ids & chunk_ids_set)
+                and relation_chunk_ids <= chunk_ids_set
+            )
 
         filtered_relations = [r for r in final_relations if relation_matches_chunks(r)]
 
@@ -4158,6 +4222,7 @@ async def _apply_token_truncation(
         entities_context.append(
             {
                 "entity": entity_name,
+                "display_name": entity.get("display_name", entity_display_name(entity_name)),
                 "type": entity.get("entity_type", "UNKNOWN"),
                 "description": entity.get("description", "UNKNOWN"),
                 "created_at": created_at,
@@ -4194,6 +4259,11 @@ async def _apply_token_truncation(
             {
                 "entity1": entity1,
                 "entity2": entity2,
+                "relation_type": relation.get("relation_type", ""),
+                "relation_facts": [
+                    {**fact, "src_id": entity_display_name(fact["src_id"]), "tgt_id": entity_display_name(fact["tgt_id"])}
+                    for fact in json.loads(relation.get("relation_facts", "[]") or "[]")
+                ],
                 "description": relation.get("description", "UNKNOWN"),
                 "created_at": created_at,
                 "file_path": relation.get("file_path", "unknown_source"),

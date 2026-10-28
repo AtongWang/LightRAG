@@ -11,6 +11,7 @@ export interface OntologySpec {
   language: 'zh' | 'en'
   entity_types: string[]
   relation_types: string[]
+  relation_constraints?: Record<string, { source_types: string[]; target_types: string[] }>
   created_at: string
   updated_at: string
 }
@@ -22,13 +23,16 @@ export interface CreateOntologyDto {
   language: 'zh' | 'en'
   entity_types: string[]
   relation_types: string[]
+  relation_constraints?: Record<string, { source_types: string[]; target_types: string[] }>
 }
 
 export interface UpdateOntologyDto {
+  version?: string
   name?: string
   description?: string
   entity_types?: string[]
   relation_types?: string[]
+  relation_constraints?: Record<string, { source_types: string[]; target_types: string[] }>
 }
 
 export interface ValidationResult {

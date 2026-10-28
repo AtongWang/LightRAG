@@ -42,8 +42,8 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
     *   **Correct Example:** `entity{tuple_delimiter}Tokyo{tuple_delimiter}location{tuple_delimiter}Tokyo is the capital of Japan.`
 
 4.  **Relationship Direction & Duplication:**
-    *   Treat all relationships as **undirected** unless explicitly stated otherwise. Swapping the source and target entities for an undirected relationship does not constitute a new relationship.
-    *   Avoid outputting duplicate relationships.
+    *   Preserve the direction of each predicate: `source_entity --relation_type--> target_entity`. For example, `artifact --created_by--> person` must not be reversed.
+    *   Keep distinct relationship types between the same entities. Reverse directions with different meanings are distinct facts. Avoid duplicate facts with the same source, target and type.
 
 5.  **Output Order & Prioritization:**
     *   Output all extracted entities first, followed by all extracted relationships.

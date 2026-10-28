@@ -66,8 +66,9 @@ export const createOntology = async (data: CreateOntologyDto): Promise<OntologyS
 export const updateOntology = async (
   ontologyId: string,
   data: UpdateOntologyDto
-): Promise<void> => {
-  await axiosInstance.put(`/ontology/${ontologyId}`, data)
+): Promise<OntologySpec> => {
+  const response = await axiosInstance.put(`/ontology/${ontologyId}`, data)
+  return response.data
 }
 
 /**
@@ -104,8 +105,8 @@ export const importOntology = async (
 ): Promise<OntologySpec> => {
   const data = JSON.parse(ontologyData)
   const response = await axiosInstance.post('/ontology/import', {
-    project_id: projectId,
-    ...data
+    ...data,
+    project_id: projectId
   })
   return response.data
 }

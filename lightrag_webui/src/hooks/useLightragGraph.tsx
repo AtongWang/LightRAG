@@ -1,4 +1,4 @@
-import Graph, { UndirectedGraph } from 'graphology'
+import Graph, { UndirectedGraph, MultiDirectedGraph } from 'graphology'
 import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '@/lib/utils'
@@ -194,7 +194,7 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
   }
 
   // Create new graph instance
-  const graph = new UndirectedGraph()
+  const graph = new MultiDirectedGraph()
 
   // Add nodes from raw graph data
   for (const rawNode of rawGraph?.nodes ?? []) {
@@ -221,10 +221,10 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
     const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
 
     rawEdge.dynamicId = graph.addEdge(rawEdge.source, rawEdge.target, {
-      label: rawEdge.properties?.keywords || undefined,
+      label: rawEdge.properties?.relation_type || rawEdge.properties?.keywords || undefined,
       size: weight, // Set initial size based on weight
       originalWeight: weight, // Store original weight for recalculation
-      type: 'curvedNoArrow' // Explicitly set edge type to no arrow
+      type: rawEdge.properties?.direction_known ? 'curvedArrow' : 'curvedNoArrow'
     })
   }
 
@@ -769,10 +769,10 @@ const useLightrangeGraph = () => {
 
           // Add the edge to the sigma graph
           newEdge.dynamicId = sigmaGraph.addEdge(newEdge.source, newEdge.target, {
-            label: newEdge.properties?.keywords || undefined,
+            label: newEdge.properties?.relation_type || newEdge.properties?.keywords || undefined,
             size: weight, // Set initial size based on weight
             originalWeight: weight, // Store original weight for recalculation
-            type: 'curvedNoArrow' // Explicitly set edge type to no arrow
+            type: newEdge.properties?.direction_known ? 'curvedArrow' : 'curvedNoArrow'
           });
 
           // Add the edge to the raw graph

@@ -3,12 +3,13 @@
 使用 KV Storage 存储项目数据，提供 CRUD 操作。
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 from datetime import datetime
 import uuid
 
 from ..utils import logger
 from ..base import BaseKVStorage
+from ..kg.shared_storage import get_storage_keyed_lock
 from .models import Project
 
 
@@ -52,7 +53,6 @@ class ProjectManager:
 
     def __init__(self, kv_storage: BaseKVStorage):
         self.kv = kv_storage
-        self._cache: Dict[str, Project] = {}
 
     async def create(
         self,
@@ -89,10 +89,6 @@ class ProjectManager:
 
     async def get(self, project_id: str) -> Optional[Project]:
         """获取项目"""
-        # 检查缓存
-        if project_id in self._cache:
-            return self._cache[project_id]
-
         # 从 KV 加载
         key = f"project_{project_id}"
         data = await self.kv.get_by_id(key)
@@ -104,7 +100,6 @@ class ProjectManager:
         filtered_data = {k: v for k, v in data.items() if k in Project.__dataclass_fields__}
 
         project = Project(**filtered_data)
-        self._cache[project_id] = project
         return project
 
     async def list_all(self) -> List[Project]:
@@ -119,22 +114,28 @@ class ProjectManager:
         return projects
 
     async def delete(self, project_id: str):
+        async with get_storage_keyed_lock([project_id], namespace=f"{self.kv.workspace}:ontology"):
+            await self._delete(project_id)
+
+    async def _delete(self, project_id: str):
         """删除项目"""
         key = f"project_{project_id}"
         await self.kv.delete([key])
 
-        # 清除缓存
-        self._cache.pop(project_id, None)
-
         # 同时删除本体
         from ..ontology import OntologyService
         ontology_service = OntologyService(self.kv)
-        await ontology_service.delete(project_id)
+        # The shared project lock is already held and is not reentrant.
+        await ontology_service._delete(project_id)
         await self.kv.index_done_callback()
 
         logger.info(f"删除项目: {project_id}")
 
     async def set_ontology_id(self, project_id: str, ontology_id: str):
+        async with get_storage_keyed_lock([project_id], namespace=f"{self.kv.workspace}:ontology"):
+            await self._set_ontology_id(project_id, ontology_id)
+
+    async def _set_ontology_id(self, project_id: str, ontology_id: str):
         """设置项目的 ontology_id"""
         project = await self.get(project_id)
         if project is None:
@@ -148,12 +149,14 @@ class ProjectManager:
             f"project_{project_id}": project.to_dict()
         })
 
-        # 更新缓存
-        self._cache[project_id] = project
         await self.kv.index_done_callback()
         logger.info(f"更新项目 {project_id} 的 ontology_id: {ontology_id}")
 
     async def update(self, project_id: str, **kwargs) -> Project:
+        async with get_storage_keyed_lock([project_id], namespace=f"{self.kv.workspace}:ontology"):
+            return await self._update(project_id, **kwargs)
+
+    async def _update(self, project_id: str, **kwargs) -> Project:
         """更新项目信息
 
         Args:
@@ -185,8 +188,6 @@ class ProjectManager:
             f"project_{project_id}": project.to_dict()
         })
 
-        # 更新缓存
-        self._cache[project_id] = project
         await self.kv.index_done_callback()
         logger.info(f"更新项目: {project_id}")
 

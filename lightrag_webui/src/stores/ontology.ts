@@ -134,25 +134,9 @@ export const useOntologyStore = create<OntologyStore>()(
       updateOntology: async (ontologyId: string, data: UpdateOntologyDto) => {
         set({ loading: true, error: null })
         try {
-          await api.updateOntology(ontologyId, data)
+          const updated = await api.updateOntology(ontologyId, data)
 
           set(state => {
-            const existingOntology = state.currentOntology?.ontology_id === ontologyId
-              ? state.currentOntology
-              : Object.values(state.ontologies).find(
-                ontology => ontology.ontology_id === ontologyId
-              )
-
-            if (!existingOntology) {
-              return { loading: false }
-            }
-
-            const updated = {
-              ...existingOntology,
-              ...data,
-              updated_at: new Date().toISOString()
-            } as OntologySpec
-
             return {
               ontologies: {
                 ...state.ontologies,

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from lightrag import LightRAG
 from lightrag.ontology import OntologyService, OntologyValidator
+from lightrag.ontology.service import OntologyVersionConflict
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 
@@ -23,15 +24,18 @@ class CreateOntologyRequest(BaseModel):
     language: str = Field(default="zh", description="语言 (zh/en)")
     entity_types: List[str] = Field(default_factory=list, description="实体类型列表")
     relation_types: List[str] = Field(default_factory=list, description="关系类型列表")
+    relation_constraints: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
 
 class UpdateOntologyRequest(BaseModel):
     """更新本体请求"""
 
     name: Optional[str] = Field(None, description="本体名称")
+    version: str | None = None
     description: Optional[str] = Field(None, description="本体描述")
     entity_types: Optional[List[str]] = Field(None, description="实体类型列表")
     relation_types: Optional[List[str]] = Field(None, description="关系类型列表")
+    relation_constraints: dict[str, dict[str, list[str]]] | None = None
 
 
 class OntologyResponse(BaseModel):
@@ -45,6 +49,7 @@ class OntologyResponse(BaseModel):
     description: str
     entity_types: List[str]
     relation_types: List[str]
+    relation_constraints: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     created_at: str
     updated_at: str
 
@@ -102,6 +107,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
                 language=request.language,
                 entity_types=request.entity_types,
                 relation_types=request.relation_types,
+                relation_constraints=request.relation_constraints,
                 created_at=datetime.utcnow().isoformat(),
                 updated_at=datetime.utcnow().isoformat(),
             )
@@ -109,16 +115,10 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
             # 创建本体
             ontology = await ontology_service.create(ontology_spec)
 
-            # 更新项目的 ontology_id
-            from lightrag.projects import ProjectManager
-
-            project_manager = ProjectManager(kv_storage)
-            await project_manager.set_ontology_id(
-                request.project_id, ontology.ontology_id
-            )
-
             return OntologyResponse(**ontology.to_dict())
 
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -174,7 +174,9 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
                 )
 
             # 更新字段
-            update_data = request.model_dump(exclude_unset=True)
+            if request.version is not None and request.version != ontology.version:
+                raise OntologyVersionConflict("Ontology changed concurrently; reload before updating")
+            update_data = request.model_dump(exclude_unset=True, exclude={"version"})
             logger.debug(f"Update ontology {ontology_id} with data: {update_data}")
             for field, value in update_data.items():
                 if hasattr(ontology, field) and value is not None:
@@ -194,6 +196,10 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
 
         except HTTPException:
             raise
+        except OntologyVersionConflict as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             import traceback
 
@@ -347,6 +353,7 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
                 language=request.language,
                 entity_types=request.entity_types,
                 relation_types=request.relation_types,
+                relation_constraints=request.relation_constraints,
                 created_at=datetime.utcnow().isoformat(),
                 updated_at=datetime.utcnow().isoformat(),
             )
@@ -354,20 +361,10 @@ def create_ontology_router(rag: LightRAG, api_key: str) -> APIRouter:
             # 创建本体 (force=True to overwrite if exists)
             ontology = await ontology_service.create(ontology_spec, force=True)
 
-            # 更新项目的 ontology_id
-            from lightrag.projects import ProjectManager
-
-            project_manager = ProjectManager(kv_storage)
-            try:
-                await project_manager.set_ontology_id(
-                    request.project_id, ontology.ontology_id
-                )
-            except Exception as e:
-                # 项目可能不存在，这不应该阻止本体导入
-                logger.warning(f"Could not update project with ontology_id: {e}")
-
             return OntologyResponse(**ontology.to_dict())
 
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             import traceback
 

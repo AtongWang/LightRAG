@@ -3187,6 +3187,8 @@ def convert_to_user_format(
             # Use original database data
             entity_payload = {
                 "entity_name": original_entity.get("entity_name", entity_name),
+                "display_name": original_entity.get("display_name", entity.get("display_name", entity_name)),
+                "project_id": original_entity.get("project_id"),
                 "entity_type": original_entity.get("entity_type", "UNKNOWN"),
                 "description": original_entity.get("description", ""),
                 "source_id": original_entity.get("source_id", ""),
@@ -3251,6 +3253,8 @@ def convert_to_user_format(
                     "description": original_relation.get("description", ""),
                     "keywords": original_relation.get("keywords", ""),
                     "weight": original_relation.get("weight", 1.0),
+                    "relation_type": original_relation.get("relation_type", ""),
+                    "relation_facts": json.loads(original_relation.get("relation_facts", "[]") or "[]"),
                     "source_id": original_relation.get("source_id", ""),
                     "file_path": original_relation.get("file_path", "unknown_source"),
                     "created_at": original_relation.get("created_at", ""),

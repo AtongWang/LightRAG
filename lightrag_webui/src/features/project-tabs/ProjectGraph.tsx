@@ -5,7 +5,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { UndirectedGraph } from 'graphology'
 import { useGraphStore, RawGraph } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import GraphViewer from '@/features/GraphViewer'
@@ -13,64 +12,7 @@ import { RefreshCw, BarChart3, X, Circle, Link2, Zap, AlertCircle } from 'lucide
 import { cn } from '@/lib/utils'
 import { getProjectGraph } from '@/api/meme-lab'
 import { resolveNodeColor } from '@/utils/graphColor'
-import * as Constants from '@/lib/constants'
-
-// 从 RawGraph 创建 Sigma 可渲染的图
-function createSigmaGraphFromRaw(rawGraph: RawGraph) {
-  const minEdgeSize = useSettingsStore.getState().minEdgeSize
-  const maxEdgeSize = useSettingsStore.getState().maxEdgeSize
-  
-  const graph = new UndirectedGraph()
-
-  // 添加节点
-  for (const rawNode of rawGraph.nodes) {
-    graph.addNode(rawNode.id, {
-      label: rawNode.id,  // 使用节点 ID（即实体名称）作为显示标签
-      color: rawNode.color,
-      x: rawNode.x ?? Math.random(),
-      y: rawNode.y ?? Math.random(),
-      size: rawNode.size,
-      borderColor: Constants.nodeBorderColor,
-      borderSize: 0.2
-    })
-  }
-
-  // 计算边的权重范围
-  let minWeight = Number.MAX_SAFE_INTEGER
-  let maxWeight = 0
-  for (const rawEdge of rawGraph.edges) {
-    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
-    minWeight = Math.min(minWeight, weight)
-    maxWeight = Math.max(maxWeight, weight)
-  }
-  const weightRange = maxWeight - minWeight
-
-  // 添加边
-  for (const rawEdge of rawGraph.edges) {
-    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
-    
-    // 计算边大小
-    let edgeSize = minEdgeSize
-    if (weightRange > 0) {
-      const sizeScale = maxEdgeSize - minEdgeSize
-      edgeSize = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5)
-    }
-
-    try {
-      rawEdge.dynamicId = graph.addEdge(rawEdge.source, rawEdge.target, {
-        label: rawEdge.properties?.keywords || undefined,
-        size: edgeSize,
-        originalWeight: weight,
-        type: 'curvedNoArrow'
-      })
-    } catch (e) {
-      // 忽略重复边错误
-      console.warn(`Skipping duplicate edge: ${rawEdge.source} -> ${rawEdge.target}`)
-    }
-  }
-
-  return graph
-}
+import { createProjectSigmaGraph } from '@/utils/projectGraph'
 
 export default function ProjectGraph() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -111,6 +53,9 @@ export default function ProjectGraph() {
         maxDepth: 3,
         maxNodes: 1000
       })
+      if (data.rebuild_required) {
+        setError('检测到旧版图谱，请备份后重新构建项目；旧实体已隐藏以避免跨项目混合。')
+      }
 
       if (!data.nodes || data.nodes.length === 0) {
         console.log('Project has no graph data')
@@ -210,7 +155,8 @@ export default function ProjectGraph() {
       console.log(`Loaded ${rawGraph.nodes.length} nodes, ${rawGraph.edges.length} edges for project ${projectId}`)
       
       // 创建 sigmaGraph（用于 GraphViewer 渲染）
-      const sigmaGraph = createSigmaGraphFromRaw(rawGraph)
+      const { minEdgeSize, maxEdgeSize } = useSettingsStore.getState()
+      const sigmaGraph = createProjectSigmaGraph(rawGraph, minEdgeSize, maxEdgeSize)
 
       // 更新 store
       useGraphStore.getState().setTypeColorMap(typeColorMap)

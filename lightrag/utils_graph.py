@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 import asyncio
+import json
+import re
 from typing import Any, cast
 
 from .base import DeletionResult
@@ -9,6 +11,206 @@ from .kg.shared_storage import get_storage_keyed_lock
 from .constants import GRAPH_FIELD_SEP
 from .utils import compute_mdhash_id, logger
 from .base import StorageNameSpace
+
+
+def entity_display_name(entity_id: str) -> str:
+    return re.sub(r"^project:[0-9a-f]{32}:", "", entity_id)
+
+
+def scope_extraction(nodes: dict, edges: dict, project_id: str | None):
+    """Keep storage IDs project-specific while retaining human-readable names."""
+    if not project_id:
+        return nodes, edges
+    prefix = f"project:{compute_mdhash_id(project_id)}:"
+    scoped_nodes = {}
+    for name, entries in nodes.items():
+        scoped_nodes[prefix + name] = [
+            {
+                **entry,
+                "entity_name": prefix + name,
+                "display_name": name,
+                "project_id": project_id,
+            }
+            for entry in entries
+        ]
+    scoped_edges = {}
+    for (src, tgt), entries in edges.items():
+        scoped_edges[(prefix + src, prefix + tgt)] = [
+            {
+                **entry,
+                "src_id": prefix + src,
+                "tgt_id": prefix + tgt,
+                "project_id": project_id,
+            }
+            for entry in entries
+        ]
+    return scoped_nodes, scoped_edges
+
+
+def merge_relation_facts(
+    entries: list[dict], existing: str = "[]", source_ids=None
+) -> str:
+    """Store directed assertions on the backend-independent retrieval edge."""
+    facts = {}
+    for entry in [*json.loads(existing or "[]"), *entries]:
+        if not entry.get("src_id") or not entry.get("tgt_id"):
+            continue
+        if source_ids is not None and entry.get("source_id") not in source_ids:
+            continue
+        fact = {
+            key: entry[key]
+            for key in (
+                "src_id",
+                "tgt_id",
+                "relation_type",
+                "source_id",
+                "description",
+                "file_path",
+                "is_system",
+            )
+            if key in entry
+        }
+        key = tuple(
+            str(fact.get(k, ""))
+            for k in ("src_id", "tgt_id", "relation_type", "source_id")
+        )
+        if key not in facts or len(fact.get("description", "")) > len(
+            facts[key].get("description", "")
+        ):
+            facts[key] = fact
+    return json.dumps([facts[key] for key in sorted(facts)], ensure_ascii=False)
+
+
+def rewrite_relation_facts(edge: dict, mapping: dict[str, str]) -> dict:
+    facts = json.loads(edge.get("relation_facts", "[]") or "[]")
+    for fact in facts:
+        for field in ("src_id", "tgt_id"):
+            fact[field] = mapping.get(fact[field], fact[field])
+    return {**edge, "relation_facts": merge_relation_facts(facts)} if facts else edge
+
+
+async def _rewrite_extraction_snapshots(
+    storage, chunk_ids, mapping, full_entities_storage=None, full_relations_storage=None
+):
+    if storage is None:
+        return
+    doc_ids = set()
+    for chunk_id in chunk_ids:
+        async with get_storage_keyed_lock(
+            [chunk_id], namespace=f"{storage.workspace}:extraction"
+        ):
+            chunk = await storage.get_by_id(chunk_id)
+            if chunk and chunk.get("full_doc_id"):
+                doc_ids.add(chunk["full_doc_id"])
+            if not chunk or "extraction" not in chunk:
+                continue
+            snapshot = chunk["extraction"]
+            nodes, edges = {}, {}
+            for name, entries in snapshot["nodes"].items():
+                new_name = mapping.get(name, name)
+                nodes.setdefault(new_name, []).extend(
+                    [
+                        {
+                            **entry,
+                            "entity_name": new_name,
+                            "display_name": entity_display_name(new_name),
+                        }
+                        for entry in entries
+                    ]
+                )
+            for edge in snapshot["edges"]:
+                src, tgt = (
+                    mapping.get(edge["src_id"], edge["src_id"]),
+                    mapping.get(edge["tgt_id"], edge["tgt_id"]),
+                )
+                if src == tgt:
+                    continue
+                edges.setdefault((src, tgt), []).extend(
+                    [
+                        {**entry, "src_id": src, "tgt_id": tgt}
+                        for entry in edge["entries"]
+                    ]
+                )
+            await storage.upsert(
+                {
+                    chunk_id: {
+                        **chunk,
+                        "extraction": {
+                            **snapshot,
+                            "nodes": nodes,
+                            "edges": [
+                                {"src_id": src, "tgt_id": tgt, "entries": entries}
+                                for (src, tgt), entries in edges.items()
+                            ],
+                        },
+                    }
+                }
+            )
+    await storage.index_done_callback()
+    for doc_id in doc_ids:
+        async with get_storage_keyed_lock(
+            [doc_id], namespace=f"{storage.workspace}:document_graph_index"
+        ):
+            for index, field in (
+                (full_entities_storage, "entity_names"),
+                (full_relations_storage, "relation_pairs"),
+            ):
+                if index is None:
+                    continue
+                record = await index.get_by_id(doc_id)
+                if not record:
+                    continue
+                if field == "entity_names":
+                    values = sorted(
+                        {mapping.get(name, name) for name in record.get(field, [])}
+                    )
+                else:
+                    pairs = {
+                        tuple(sorted(mapping.get(name, name) for name in pair))
+                        for pair in record.get(field, [])
+                    }
+                    values = [
+                        list(pair) for pair in sorted(pairs) if pair[0] != pair[1]
+                    ]
+                await index.upsert(
+                    {doc_id: {**record, field: values, "count": len(values)}}
+                )
+                await index.index_done_callback()
+
+
+def expand_relation_facts(edge: dict) -> list[dict]:
+    """Expose one graph edge per directed predicate without duplicating sources."""
+    facts = json.loads(edge.get("relation_facts", "[]") or "[]")
+    if not facts:
+        return [{**edge, "direction_known": False}]
+    groups = {}
+    for fact in facts:
+        key = (fact["src_id"], fact["tgt_id"], fact.get("relation_type", ""))
+        groups.setdefault(key, []).append(fact)
+    result = []
+    for (src, tgt, relation), entries in sorted(groups.items()):
+        result.append(
+            {
+                **edge,
+                "id": compute_mdhash_id(
+                    json.dumps([src, tgt, relation]), prefix="fact-"
+                ),
+                "source": src,
+                "target": tgt,
+                "src_id": src,
+                "tgt_id": tgt,
+                "relation_type": relation,
+                "direction_known": True,
+                "description": GRAPH_FIELD_SEP.join(
+                    dict.fromkeys(e.get("description", "") for e in entries)
+                ),
+                "source_id": GRAPH_FIELD_SEP.join(
+                    dict.fromkeys(e.get("source_id", "") for e in entries)
+                ),
+                "relation_facts": json.dumps(entries, ensure_ascii=False),
+            }
+        )
+    return result
 
 
 async def _persist_graph_updates(
@@ -255,6 +457,9 @@ async def _edit_entity_impl(
     *,
     entity_chunks_storage=None,
     relation_chunks_storage=None,
+    text_chunks_storage=None,
+    full_entities_storage=None,
+    full_relations_storage=None,
 ) -> dict[str, Any]:
     """Internal helper that edits an entity without acquiring storage locks.
 
@@ -286,6 +491,8 @@ async def _edit_entity_impl(
     if not node_exists:
         raise ValueError(f"Entity '{entity_name}' does not exist")
     node_data = await chunk_entity_relation_graph.get_node(entity_name)
+    if "project_id" in updated_data and updated_data["project_id"] != node_data.get("project_id"):
+        raise ValueError("Entity project namespace is immutable")
 
     if is_renaming:
         existing_node = await chunk_entity_relation_graph.has_node(new_entity_name)
@@ -296,6 +503,8 @@ async def _edit_entity_impl(
 
     new_node_data = {**node_data, **updated_data}
     new_node_data["entity_id"] = new_entity_name
+    if is_renaming:
+        new_node_data["display_name"] = updated_data.get("display_name", entity_display_name(new_entity_name))
 
     if "entity_name" in new_node_data:
         del new_node_data[
@@ -314,6 +523,7 @@ async def _edit_entity_impl(
             for source, target in edges:
                 edge_data = await chunk_entity_relation_graph.get_edge(source, target)
                 if edge_data:
+                    edge_data = rewrite_relation_facts(edge_data, {entity_name: new_entity_name})
                     relations_to_delete.append(
                         compute_mdhash_id(source + target, prefix="rel-")
                     )
@@ -495,6 +705,11 @@ async def _edit_entity_impl(
                 f"Entity Edit: migrate {len(relations_to_update)} relations after rename"
             )
 
+    if is_renaming and text_chunks_storage is not None:
+        tracking = await entity_chunks_storage.get_by_id(entity_name) if entity_chunks_storage is not None else None
+        chunk_ids = tracking.get("chunk_ids", []) if tracking else (await chunk_entity_relation_graph.get_node(entity_name)).get("source_id", "").split(GRAPH_FIELD_SEP)
+        await _rewrite_extraction_snapshots(text_chunks_storage, chunk_ids, {original_entity_name: entity_name}, full_entities_storage, full_relations_storage)
+
     await _persist_graph_updates(
         entities_vdb=entities_vdb,
         relationships_vdb=relationships_vdb,
@@ -522,6 +737,9 @@ async def aedit_entity(
     allow_merge: bool = False,
     entity_chunks_storage=None,
     relation_chunks_storage=None,
+    text_chunks_storage=None,
+    full_entities_storage=None,
+    full_relations_storage=None,
 ) -> dict[str, Any]:
     """Asynchronously edit entity information.
 
@@ -570,6 +788,8 @@ async def aedit_entity(
     """
     new_entity_name = updated_data.get("entity_name", entity_name)
     is_renaming = new_entity_name != entity_name
+    if is_renaming and entity_display_name(entity_name) != entity_name:
+        raise ValueError("Project entity IDs are immutable; edit display_name instead")
 
     lock_keys = sorted({entity_name, new_entity_name}) if is_renaming else [entity_name]
 
@@ -630,6 +850,9 @@ async def aedit_entity(
                                 non_name_updates,
                                 entity_chunks_storage=entity_chunks_storage,
                                 relation_chunks_storage=relation_chunks_storage,
+                                text_chunks_storage=text_chunks_storage,
+                                full_entities_storage=full_entities_storage,
+                                full_relations_storage=full_relations_storage,
                             )
                             non_name_updates_applied = True
                         except Exception as update_error:
@@ -651,6 +874,9 @@ async def aedit_entity(
                             target_entity_data=None,
                             entity_chunks_storage=entity_chunks_storage,
                             relation_chunks_storage=relation_chunks_storage,
+                            text_chunks_storage=text_chunks_storage,
+                            full_entities_storage=full_entities_storage,
+                            full_relations_storage=full_relations_storage,
                         )
 
                         # Merge succeeded
@@ -702,6 +928,9 @@ async def aedit_entity(
                 updated_data,
                 entity_chunks_storage=entity_chunks_storage,
                 relation_chunks_storage=relation_chunks_storage,
+                text_chunks_storage=text_chunks_storage,
+                full_entities_storage=full_entities_storage,
+                full_relations_storage=full_relations_storage,
             )
             operation_summary["operation_status"] = "success"
             return {**edit_result, "operation_summary": operation_summary}
@@ -1170,6 +1399,9 @@ async def _merge_entities_impl(
     target_entity_data: dict[str, Any] = None,
     entity_chunks_storage=None,
     relation_chunks_storage=None,
+    text_chunks_storage=None,
+    full_entities_storage=None,
+    full_relations_storage=None,
 ) -> dict[str, Any]:
     """Internal helper that merges entities without acquiring storage locks.
 
@@ -1261,6 +1493,7 @@ async def _merge_entities_impl(
 
     # 5. Create or update the target entity
     merged_entity_data["entity_id"] = target_entity
+    merged_entity_data["display_name"] = target_entity_data.get("display_name", entity_display_name(target_entity))
     if not target_exists:
         await chunk_entity_relation_graph.upsert_node(target_entity, merged_entity_data)
         logger.info(f"Entity Merge: created target '{target_entity}'")
@@ -1290,6 +1523,7 @@ async def _merge_entities_impl(
 
         new_src = target_entity if src in source_entities else src
         new_tgt = target_entity if tgt in source_entities else tgt
+        edge_data = rewrite_relation_facts(edge_data, dict.fromkeys(source_entities, target_entity))
 
         # Skip relationships between source entities to avoid self-loops
         if new_src == new_tgt:
@@ -1339,6 +1573,13 @@ async def _merge_entities_impl(
                 filter_none_only=True,  # Use relation behavior: only filter None
             )
             relation_updates[relation_key]["data"] = merged_relation
+            merged_relation["relation_facts"] = merge_relation_facts(
+                json.loads(edge_data.get("relation_facts", "[]") or "[]"),
+                existing_data.get("relation_facts", "[]"),
+            )
+            merged_relation["relation_type"] = GRAPH_FIELD_SEP.join(sorted({
+                fact["relation_type"] for fact in json.loads(merged_relation["relation_facts"]) if fact.get("relation_type")
+            }))
             logger.debug(
                 f"Entity Merge: deduplicating relation `{normalized_src}`~`{normalized_tgt}`"
             )
@@ -1506,6 +1747,11 @@ async def _merge_entities_impl(
         await entities_vdb.delete([entity_id])
 
     # 11. Save changes
+    if text_chunks_storage is not None:
+        tracking = await entity_chunks_storage.get_by_id(target_entity) if entity_chunks_storage is not None else None
+        chunk_ids = tracking.get("chunk_ids", []) if tracking else (await chunk_entity_relation_graph.get_node(target_entity)).get("source_id", "").split(GRAPH_FIELD_SEP)
+        await _rewrite_extraction_snapshots(text_chunks_storage, chunk_ids, dict.fromkeys(source_entities, target_entity), full_entities_storage, full_relations_storage)
+
     await _persist_graph_updates(
         entities_vdb=entities_vdb,
         relationships_vdb=relationships_vdb,
@@ -1535,6 +1781,9 @@ async def amerge_entities(
     target_entity_data: dict[str, Any] = None,
     entity_chunks_storage=None,
     relation_chunks_storage=None,
+    text_chunks_storage=None,
+    full_entities_storage=None,
+    full_relations_storage=None,
 ) -> dict[str, Any]:
     """Asynchronously merge multiple entities into one entity.
 
@@ -1558,6 +1807,10 @@ async def amerge_entities(
     Returns:
         Dictionary containing the merged entity information
     """
+    prefixes = {":".join(name.split(":", 2)[:2]) if entity_display_name(name) != name else "" for name in [*source_entities, target_entity]}
+    if len(prefixes) > 1:
+        raise ValueError("Cannot merge entities across project namespaces")
+
     # Collect all entities involved (source + target) and lock them all in sorted order
     all_entities = set(source_entities)
     all_entities.add(target_entity)
@@ -1579,6 +1832,9 @@ async def amerge_entities(
                 target_entity_data=target_entity_data,
                 entity_chunks_storage=entity_chunks_storage,
                 relation_chunks_storage=relation_chunks_storage,
+                text_chunks_storage=text_chunks_storage,
+                full_entities_storage=full_entities_storage,
+                full_relations_storage=full_relations_storage,
             )
         except Exception as e:
             logger.error(f"Error merging entities: {e}")

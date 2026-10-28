@@ -437,7 +437,7 @@ class NetworkXStorage(BaseGraphStorage):
 
             result.nodes.append(
                 KnowledgeGraphNode(
-                    id=str(node), labels=[str(node)], properties=node_properties
+                    id=str(node), labels=[node_properties.get("display_name", str(node))], properties=node_properties
                 )
             )
             seen_nodes.add(str(node))
