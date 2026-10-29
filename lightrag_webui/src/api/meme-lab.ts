@@ -79,8 +79,26 @@ export const createProject = async (data: CreateProjectDto): Promise<Project> =>
 export const updateProject = async (
   projectId: string,
   data: UpdateProjectDto
-): Promise<void> => {
-  await api.put(`/projects/${projectId}`, data)
+): Promise<Project> => {
+  const response = await api.put(`/projects/${projectId}`, data)
+  return response.data
+}
+
+export interface MaterialSummary {
+  used_files: number
+  skipped_files: number
+  omitted_files: number
+  sampled: boolean
+}
+
+export const generateProjectDescription = async (projectId: string): Promise<{ description: string; material_summary: MaterialSummary }> => {
+  const response = await api.post(`/projects/${projectId}/generate-description`, {})
+  return response.data
+}
+
+export const buildProjectGraph = async (projectId: string, ontologyId: string, ontologyVersion: string): Promise<{ built_documents: number }> => {
+  const response = await api.post(`/projects/${projectId}/build-graph`, { ontology_id: ontologyId, ontology_version: ontologyVersion })
+  return response.data
 }
 
 /**
@@ -134,8 +152,9 @@ export const createOntology = async (data: CreateOntologyDto): Promise<OntologyS
 export const updateOntology = async (
   ontologyId: string,
   data: UpdateOntologyDto
-): Promise<void> => {
-  await api.put(`/ontology/${ontologyId}`, data)
+): Promise<OntologySpec> => {
+  const response = await api.put(`/ontology/${ontologyId}`, data)
+  return response.data
 }
 
 /**
@@ -150,6 +169,16 @@ export const deleteOntology = async (ontologyId: string): Promise<void> => {
  */
 export const validateOntology = async (ontologyId: string): Promise<ValidationResult> => {
   const response = await api.get(`/ontology/${ontologyId}/validate`)
+  return response.data
+}
+
+export const validateOntologyDraft = async (draft: CreateOntologyDto & { version?: string }): Promise<ValidationResult> => {
+  const response = await api.post('/ontology/validate', draft)
+  return response.data
+}
+
+export const generateOntology = async (request: { project_id: string; requirements?: string; document_ids?: string[]; language?: 'zh' | 'en' }): Promise<CreateOntologyDto & { material_summary?: MaterialSummary }> => {
+  const response = await api.post('/ontology/generate', request)
   return response.data
 }
 
@@ -285,7 +314,9 @@ export const ontologyApi = {
   create: createOntology,
   update: updateOntology,
   delete: deleteOntology,
-  validate: validateOntology
+  validate: validateOntology,
+  validateDraft: validateOntologyDraft,
+  generate: generateOntology
 }
 
 export const enrichmentApi = {

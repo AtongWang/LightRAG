@@ -8,6 +8,7 @@ import { DocumentUploader, FileList } from '@/features/documents'
 import { Upload, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useProjectStore } from '@/stores'
+import { ProjectGraphBuildDialog } from '@/features/projects/ProjectGraphBuildDialog'
 
 export default function ProjectDocuments() {
   const [view, setView] = useState<'upload' | 'list'>('list')
@@ -29,14 +30,16 @@ export default function ProjectDocuments() {
           <div>
             <h2 className="text-xl font-bold text-foreground">文档管理</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              上传和管理项目文档
+              先上传解析资料，再确认中文本体，最后手动构建图谱
             </p>
           </div>
           <div className="flex gap-2">
+            {currentProject && <ProjectGraphBuildDialog key={currentProject.project_id} projectId={currentProject.project_id}
+              onBuilt={() => setRefreshTrigger(value => value + 1)} />}
             <button
               onClick={() => setView('list')}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all",
+                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all',
                 view === 'list'
                   ? 'bg-[hsl(var(--vermillion))] text-white shadow-md'
                   : 'bg-white dark:bg-[hsl(var(--card))] border border-[hsl(var(--border))] hover:border-[hsl(var(--vermillion)/0.3)] hover:bg-[hsl(var(--vermillion)/0.05)]'
@@ -48,7 +51,7 @@ export default function ProjectDocuments() {
             <button
               onClick={() => setView('upload')}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all",
+                'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all',
                 view === 'upload'
                   ? 'bg-[hsl(var(--vermillion))] text-white shadow-md'
                   : 'bg-white dark:bg-[hsl(var(--card))] border border-[hsl(var(--border))] hover:border-[hsl(var(--vermillion)/0.3)] hover:bg-[hsl(var(--vermillion)/0.05)]'

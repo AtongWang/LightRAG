@@ -1611,7 +1611,7 @@ class LightRAG:
 
         # Check if document already exists
         _add_doc_keys = await self.full_docs.filter_keys({doc_key})
-        if doc_key not in _add_doc_keys:
+        if doc_key not in _add_doc_keys and not (metadata or {}).get("defer_graph"):
             logger.info(f"Document {file_name} already exists in storage, skipping")
             existing_doc_status = await self.doc_status.get_by_id(doc_key)
             if existing_doc_status:
@@ -1688,6 +1688,18 @@ class LightRAG:
 
         if not inserting_chunks:
             logger.warning(f"No content extracted from {file_name}")
+            return
+
+        if (metadata or {}).get("defer_graph"):
+            await self.full_docs.upsert(new_docs)
+            status = await self.doc_status.get_by_id(doc_key) or {}
+            now = datetime.now(timezone.utc).isoformat()
+            await self._stage_project_document(doc_key, inserting_chunks, {
+                **status, "content_summary": parse_result.content[:500], "content_length": len(parse_result.content),
+                "file_path": display_file_name, "track_id": track_id,
+                "created_at": status.get("created_at", now), "updated_at": now,
+                "metadata": {**(parse_result.metadata or {}), **(metadata or {})},
+            })
             return
 
         # Filter already existing chunks
@@ -1770,6 +1782,16 @@ class LightRAG:
         await self.doc_status.upsert(doc_status_data)
 
         logger.info(f"Successfully inserted multimodal document: {file_name}")
+
+    async def _stage_project_document(self, doc_id: str, chunks: dict, status: dict) -> None:
+        """Persist parsed material without extracting entities or indexing vectors."""
+        await self.text_chunks.upsert(chunks)
+        await self.doc_status.upsert({doc_id: {
+            **status, "status": DocStatus.PREPROCESSED, "chunks_count": len(chunks),
+            "chunks_list": list(chunks), "error_msg": None,
+            "metadata": {**(status.get("metadata") or {}), "defer_graph": True, "graph_status": "awaiting_ontology"},
+        }})
+        await self._insert_done()
 
     # TODO: deprecated, use insert instead
     def insert_custom_chunks(
@@ -2452,6 +2474,10 @@ class LightRAG:
                             if not chunks:
                                 logger.warning("No document chunks to process")
 
+                            if status_doc.metadata.get("defer_graph"):
+                                await self._stage_project_document(doc_id, chunks, vars(status_doc))
+                                return
+
                             # Record processing start time
                             processing_start_time = int(time.time())
 
@@ -2825,12 +2851,12 @@ class LightRAG:
                 pipeline_status["history_messages"].append(log_message)
 
     async def _process_extract_entities(
-        self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
+        self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None, global_config=None
     ) -> list:
         try:
             chunk_results = await extract_entities(
                 chunk,
-                global_config=self._get_config_dict(),
+                global_config=global_config or self._get_config_dict(),
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,

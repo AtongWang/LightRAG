@@ -1,4 +1,16 @@
-import type { OntologySpec } from '@/types/ontology'
+import type { CreateOntologyDto, OntologySpec } from '@/types/ontology'
+
+export function applyGeneratedOntology(current: OntologySpec | null, draft: CreateOntologyDto): OntologySpec {
+  if (current && current.project_id !== draft.project_id) throw new Error('本体草稿所属项目不一致。')
+  const now = new Date().toISOString()
+  return {
+    ...draft,
+    ontology_id: current?.ontology_id || '',
+    version: current?.version || '1.0',
+    created_at: current?.created_at || now,
+    updated_at: current?.updated_at || now
+  }
+}
 
 export function editOntologyType(
   ontology: OntologySpec,
@@ -6,7 +18,9 @@ export function editOntologyType(
   oldName: string,
   newName?: string
 ): OntologySpec {
-  if (oldName === 'Other') throw new Error('Other 是必需的兜底类型，不能修改或删除。')
+  if (['Other', '其他'].includes(oldName) && !['Other', '其他'].includes(newName || '')) {
+    throw new Error('其他是必需的兜底类型，不能删除或改为非兜底名称。')
+  }
   if (newName !== undefined && (!newName.trim() || (newName !== oldName && ontology[field].includes(newName)))) {
     throw new Error('类型名称不能为空或重复。')
   }

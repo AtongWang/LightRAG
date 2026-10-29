@@ -1,6 +1,7 @@
 import { PencilIcon } from 'lucide-react'
 import Text from '@/components/ui/Text'
 import { useTranslation } from 'react-i18next'
+import { formatGraphDescription } from '@/utils/graphDescription'
 
 interface PropertyNameProps {
   name: string
@@ -44,10 +45,10 @@ interface PropertyValueProps {
 export const PropertyValue = ({ value, onClick, tooltip }: PropertyValueProps) => (
   <div className="flex items-center gap-1 overflow-hidden">
     <Text
-      className="hover:bg-primary/20 rounded p-1 overflow-hidden text-ellipsis whitespace-nowrap"
-      tooltipClassName="max-w-80 -translate-x-15"
-      text={value}
-      tooltip={tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2))}
+      className="hover:bg-primary/20 rounded p-1 overflow-hidden text-ellipsis whitespace-pre-line break-words"
+      tooltipClassName="max-w-80 -translate-x-15 whitespace-pre-line break-words"
+      text={typeof value === 'string' ? formatGraphDescription(value) : value}
+      tooltip={formatGraphDescription(tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2)))}
       side="left"
       onClick={onClick}
     />

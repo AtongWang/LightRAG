@@ -97,24 +97,14 @@ class MineruAPIParser(BaseParser):
             
         super().__init__(config)
         self.api_url = api_url.rstrip("/")
-        self._session: Optional[aiohttp.ClientSession] = None
         
     @property
     def name(self) -> str:
         return "MinerU API"
     
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=self.config.api_timeout)
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
-    
-    async def _close_session(self):
-        """Close aiohttp session"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+        """Create a session owned by one operation, never another upload."""
+        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.config.api_timeout))
     
     def check_availability(self) -> bool:
         """Check if MinerU API is available (sync version)
@@ -147,6 +137,7 @@ class MineruAPIParser(BaseParser):
     
     async def _check_health(self) -> bool:
         """Async health check"""
+        session = None
         try:
             session = await self._get_session()
             # MinerU API doesn't have a /health endpoint, check /openapi.json instead
@@ -162,6 +153,9 @@ class MineruAPIParser(BaseParser):
         except Exception as e:
             logger.warning(f"MinerU API health check error: {e}")
             return False
+        finally:
+            if session is not None:
+                await session.close()
     
     async def parse_document(
         self,
@@ -196,6 +190,7 @@ class MineruAPIParser(BaseParser):
         
         logger.info(f"Parsing document via MinerU API: {file_path}")
         
+        session = None
         try:
             session = await self._get_session()
             
@@ -243,7 +238,8 @@ class MineruAPIParser(BaseParser):
             logger.error(f"Error parsing document: {e}")
             raise
         finally:
-            await self._close_session()
+            if session is not None:
+                await session.close()
     
     async def _upload_and_parse(
         self,

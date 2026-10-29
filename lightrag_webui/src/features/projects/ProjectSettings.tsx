@@ -8,6 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useProjectStore, useOntologyStore, useUIStore } from '@/stores'
 import { Save, X, Trash2, Upload, Image as ImageIcon } from 'lucide-react'
 import Button from '@/components/ui/Button'
+import { ProjectDescriptionGenerator } from './ProjectDescriptionGenerator'
 
 interface ProjectSettingsData {
   name: string
@@ -35,15 +36,16 @@ export function ProjectSettings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
-    if (currentProject) {
+    if (currentProject && currentProject.project_id === projectId) {
       setFormData({
         name: currentProject.name,
         description: currentProject.description || '',
         cover_image: currentProject.cover_image || '',
         tags: currentProject.tags || []
       })
+      setHasChanges(false)
     }
-  }, [currentProject])
+  }, [currentProject, projectId])
 
   const handleChange = (field: keyof ProjectSettingsData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -51,7 +53,7 @@ export function ProjectSettings() {
   }
 
   const handleSave = async () => {
-    if (!projectId) return
+    if (!projectId || !formData.name.trim()) return
 
     try {
       await updateProject(projectId, formData)
@@ -97,7 +99,7 @@ export function ProjectSettings() {
     }
   }
 
-  if (!currentProject) {
+  if (!currentProject || currentProject.project_id !== projectId) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -109,7 +111,7 @@ export function ProjectSettings() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <fieldset disabled={loading} aria-label="项目设置" className="flex-1 min-h-0 min-w-0 overflow-y-auto w-full max-w-4xl mx-auto p-6 space-y-6">
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <div>
@@ -136,7 +138,7 @@ export function ProjectSettings() {
           )}
           <Button
             onClick={handleSave}
-            disabled={!hasChanges || loading}
+            disabled={!hasChanges || loading || !formData.name.trim()}
           >
             <Save className="w-4 h-4 mr-2" />
             保存更改
@@ -179,6 +181,7 @@ export function ProjectSettings() {
               <p className="text-xs text-muted-foreground mt-2">
                 建议尺寸：800x600像素
               </p>
+              {formData.cover_image && <Button variant="ghost" size="sm" onClick={() => handleChange('cover_image', '')}>移除封面</Button>}
             </div>
           </div>
         </div>
@@ -188,6 +191,7 @@ export function ProjectSettings() {
           <label className="block text-sm font-medium mb-2">项目名称</label>
           <input
             type="text"
+            maxLength={200}
             value={formData.name}
             onChange={(e) => handleChange('name', e.target.value)}
             className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary"
@@ -197,8 +201,12 @@ export function ProjectSettings() {
 
         {/* 项目描述 */}
         <div>
-          <label className="block text-sm font-medium mb-2">项目描述</label>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <label className="block text-sm font-medium" htmlFor="project-description">项目简介</label>
+            <ProjectDescriptionGenerator key={projectId} projectId={projectId!} disabled={loading} onApply={text => handleChange('description', text)} />
+          </div>
           <textarea
+            id="project-description"
             value={formData.description}
             onChange={(e) => handleChange('description', e.target.value)}
             className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary min-h-[120px]"
@@ -247,7 +255,7 @@ export function ProjectSettings() {
       {/* 本体信息 */}
       <div className="bg-white rounded-lg shadow-sm p-6 space-y-4">
         <h2 className="text-lg font-semibold">本体配置</h2>
-        {currentOntology ? (
+        {currentOntology?.project_id === projectId ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">当前本体</span>
@@ -267,7 +275,7 @@ export function ProjectSettings() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">暂未配置本体</p>
+          <p className="text-sm text-muted-foreground">{currentProject.ontology_id ? '已配置本体，请在本体页查看详情' : '暂未配置本体'}</p>
         )}
       </div>
 
@@ -336,6 +344,6 @@ export function ProjectSettings() {
           </div>
         )}
       </div>
-    </div>
+    </fieldset>
   )
 }

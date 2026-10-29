@@ -3062,6 +3062,7 @@ async def extract_entities(
                     if not validation.is_valid:
                         raise ValueError(f"Invalid ontology: {validation.error_message}")
                     # Override entity_types and relation_types from ontology
+                    language = "Chinese" if ontology.language.lower().startswith(("zh", "ch")) else "English"
                     entity_types = ontology.entity_types
                     relation_types = ontology.relation_types
                     ontology_loaded = True
@@ -3209,7 +3210,8 @@ async def extract_entities(
         return filtered_nodes, filtered_edges
 
     def _is_zh_language(language_value: str) -> bool:
-        return str(language_value).strip().lower().startswith("zh")
+        value = str(language_value).strip().lower()
+        return value.startswith(("zh", "ch")) or value == "中文"
 
     def _normalize_multimodal_type(modal_type: str) -> str:
         normalized = (modal_type or "").strip().lower()
@@ -3233,7 +3235,7 @@ async def extract_entities(
         return _normalize_multimodal_type(modal_type)
 
     def _pick_multimodal_relation_type() -> str:
-        return "has_attachment"
+        return "包含附件" if _is_zh_language(language) else "has_attachment"
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -3245,6 +3247,15 @@ async def extract_entities(
     )
     # add example's format
     examples = examples.format(**example_context_base)
+    if _is_zh_language(language):
+        delimiter = PROMPTS["DEFAULT_TUPLE_DELIMITER"]
+        examples = (
+            "示例（仅演示输出格式，实际实体必须来自输入资料）：\n"
+            f"entity{delimiter}示例实体甲{delimiter}{entity_types[0]}{delimiter}示例实体甲是资料中明确记载的对象。\n"
+            f"entity{delimiter}示例实体乙{delimiter}{entity_types[-1]}{delimiter}示例实体乙是资料中明确记载的关联对象。\n"
+            f"relation{delimiter}示例实体甲{delimiter}示例实体乙{delimiter}{relation_types[0]}{delimiter}示例关系{delimiter}资料明确记载了两个示例实体的关系。\n"
+            + PROMPTS["DEFAULT_COMPLETION_DELIMITER"]
+        )
 
     context_base = dict(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
@@ -3254,6 +3265,8 @@ async def extract_entities(
         examples=examples,
         language=language,
         ontology_injection=ontology_injection,
+        entity_fallback="其他" if "其他" in entity_types else "Other",
+        relation_fallback="其他" if "其他" in relation_types else "Other",
     )
 
     processed_chunks = 0
@@ -3388,6 +3401,7 @@ async def extract_entities(
                 maybe_nodes.setdefault(multimodal_entity_name, []).append(
                     {
                         "entity_name": multimodal_entity_name,
+                        "display_name": f"{_normalize_multimodal_type(modal_type)}内容{chunk_dp.get('chunk_order_index', 0) + 1}" if _is_zh_language(language) else multimodal_entity_name,
                         "entity_type": multimodal_entity_type,
                         "is_system": True,
                         "description": multimodal_description,
@@ -3405,7 +3419,8 @@ async def extract_entities(
                         continue
                     relation_key = (entity_name, multimodal_entity_name)
                     relation_description = (
-                        f"{modal_type} content related to {entity_name}"
+                        f"{entity_name}包含此{_normalize_multimodal_type(modal_type)}资料。" if _is_zh_language(language)
+                        else f"{modal_type} content related to {entity_name}"
                     )
                     maybe_edges.setdefault(relation_key, []).append(
                         {
@@ -3413,7 +3428,7 @@ async def extract_entities(
                             "tgt_id": multimodal_entity_name,
                             "weight": 1.0,
                             "description": relation_description,
-                            "keywords": modal_type,
+                            "keywords": _normalize_multimodal_type(modal_type),
                             "source_id": chunk_key,
                             "file_path": file_path,
                             "timestamp": timestamp,

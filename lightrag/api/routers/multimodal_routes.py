@@ -91,6 +91,7 @@ def create_multimodal_routes(rag, api_key: Optional[str] = None):
         rag: LightRAG instance
         api_key: Optional API key for authentication
     """
+    router = APIRouter(tags=["multimodal"])
     combined_auth = get_combined_auth_dependency(api_key)
     
     # Initialize multimodal storage
@@ -600,6 +601,7 @@ def create_multimodal_routes(rag, api_key: Optional[str] = None):
                 }
                 if project_id:
                     metadata["project_id"] = project_id
+                    metadata["defer_graph"] = True
                 
                 # Use the multimodal insert method
                 result_track_id = await rag.ainsert_multimodal(
@@ -608,6 +610,15 @@ def create_multimodal_routes(rag, api_key: Optional[str] = None):
                     track_id=track_id,
                     metadata=metadata,
                 )
+                from lightrag.base import DocStatus
+
+                statuses = await rag.doc_status.get_docs_by_track_id(result_track_id)
+                failures = [record for record in statuses.values() if record.status == DocStatus.FAILED]
+                if failures:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Document '{file.filename}' failed to process: {failures[0].error_msg or 'Unknown processing error'}",
+                    )
                 
                 return {
                     "status": "success",

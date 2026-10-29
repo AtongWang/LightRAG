@@ -18,7 +18,7 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
     *   **Identification:** Identify clearly defined and meaningful entities in the input text.
     *   **Entity Details:** For each identified entity, extract the following information:
         *   `entity_name`: The name of the entity. If the entity name is case-insensitive, capitalize the first letter of each significant word (title case). Ensure **consistent naming** across the entire extraction process.
-        *   `entity_type`: Categorize the entity using one of the following types: `{entity_types}`. If none of the provided entity types apply, do not add new entity type and classify it as `Other`.
+        *   `entity_type`: Categorize the entity using one of the following types: `{entity_types}`. If none apply, use `{entity_fallback}`.
         *   `entity_description`: Provide a concise yet comprehensive description of the entity's attributes and activities, based *solely* on the information present in the input text.
     *   **Output Format - Entities:** Output a total of 4 fields for each entity, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `entity`.
         *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
@@ -30,7 +30,7 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
     *   **Relationship Details:** For each binary relationship, extract the following fields:
         *   `source_entity`: The name of the source entity. Ensure **consistent naming** with entity extraction. Capitalize the first letter of each significant word (title case) if the name is case-insensitive.
         *   `target_entity`: The name of the target entity. Ensure **consistent naming** with entity extraction. Capitalize the first letter of each significant word (title case) if the name is case-insensitive.
-        *   `relation_type`: The type of this relationship. Must be one of the following: `{relation_types}`. If none of the provided types apply, use `Other`.
+        *   `relation_type`: The type of this relationship. Must be one of the following: `{relation_types}`. If none apply, use `{relation_fallback}`.
         *   `relationship_keywords`: One or more high-level keywords summarizing the overarching nature, concepts, or themes of the relationship. Multiple keywords within this field must be separated by a comma `,`. **DO NOT use `{tuple_delimiter}` for separating multiple keywords within this field.**
         *   `relationship_description`: A concise explanation of the nature of the relationship between the source and target entities, providing a clear rationale for their connection.
     *   **Output Format - Relationships:** Output a total of 6 fields for each relationship, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `relation`.
@@ -55,7 +55,7 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 
 7.  **Language & Proper Nouns:**
     *   The entire output (entity names, keywords, and descriptions) must be written in `{language}`.
-    *   Proper nouns (e.g., personal names, place names, organization names) should be retained in their original language if a proper, widely accepted translation is not available or would cause ambiguity.
+    *   When the output language is Chinese, use Chinese names or established Chinese translations. Never translate existing Chinese names into English. Preserve catalogue numbers, identifiers and essential abbreviations.
 
 8.  **Completion Signal:** Output the literal string `{completion_delimiter}` only after all entities and relationships, following all criteria, have been completely extracted and outputted.
 
@@ -70,7 +70,7 @@ Extract entities and relationships from the input text in Data to be Processed b
 1.  **Strict Adherence to Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system prompt.
 2.  **Output Content Only:** Output *only* the extracted list of entities and relationships. Do not include any introductory or concluding remarks, explanations, or additional text before or after the list.
 3.  **Completion Signal:** Output `{completion_delimiter}` as the final line after all relevant entities and relationships have been extracted and presented.
-4.  **Output Language:** Ensure the output language is {language}. Proper nouns (e.g., personal names, place names, organization names) must be kept in their original language and not translated.
+4.  **Output Language:** Ensure names, keywords and descriptions use {language}. For Chinese output, use Chinese proper names or established Chinese translations; retain catalogue numbers and identifiers.
 
 ---Data to be Processed---
 <Entity_types>
@@ -97,7 +97,7 @@ Based on the last extraction task, identify and extract any **missed or incorrec
 4.  **Output Format - Relationships:** Output a total of 6 fields for each relationship, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `relation`.
 5.  **Output Content Only:** Output *only* the extracted list of entities and relationships. Do not include any introductory or concluding remarks, explanations, or additional text before or after the list.
 6.  **Completion Signal:** Output `{completion_delimiter}` as the final line after all relevant missing or corrected entities and relationships have been extracted and presented.
-7.  **Output Language:** Ensure the output language is {language}. Proper nouns (e.g., personal names, place names, organization names) must be kept in their original language and not translated.
+7.  **Output Language:** Ensure names, keywords and descriptions use {language}. For Chinese output, use Chinese proper names or established Chinese translations; retain catalogue numbers and identifiers.
 
 <Output>
 """

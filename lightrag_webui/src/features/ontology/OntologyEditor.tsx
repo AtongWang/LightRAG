@@ -5,19 +5,20 @@
 
 import { useState, useEffect } from 'react'
 import { useOntologyStore } from '@/stores'
-import { validateOntology } from '@/api/ontology'
+import { validateOntologyDraft } from '@/api/meme-lab'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { Badge } from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
 import { EntityTypeList } from './EntityTypeList'
 import { RelationTypeList } from './RelationTypeList'
 import { OntologyImportDialog } from './OntologyImportDialog'
+import { OntologyGenerateDialog } from './OntologyGenerateDialog'
 import { Save, CheckCircle2, AlertCircle, Download, Upload, Eye, Plus, Trash2 } from 'lucide-react'
 import { importOntology } from '@/api/ontology'
 import type { OntologySpec } from '@/types/ontology'
-import { editOntologyType } from '@/utils/ontology'
+import { editOntologyType, applyGeneratedOntology } from '@/utils/ontology'
+import type { CreateOntologyDto } from '@/types/ontology'
 
 interface OntologyEditorProps {
   projectId: string
@@ -28,12 +29,10 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     ontologies,
     loading,
     error,
-    validationError,
     fetchOntology,
     createOntology,
     updateOntology,
     deleteOntology,
-    validateOntology: validateOntologyStore,
     clearError,
     setCurrentOntology
   } = useOntologyStore()
@@ -50,11 +49,13 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     isValid: boolean
     warnings?: string[]
     error?: string
+    draftKey?: string
   } | null>(null)
 
   // Working copy of the ontology
   const [workingOntology, setWorkingOntology] = useState<OntologySpec | null>(null)
   const projectOntology = ontologies[projectId] || null
+  const draftKey = JSON.stringify([projectId, workingOntology])
 
   useEffect(() => {
     setWorkingOntology(null)
@@ -74,14 +75,18 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
     setIsSaving(true)
     try {
-      await updateOntology(workingOntology.ontology_id, {
-        version: workingOntology.version,
-        name: workingOntology.name,
-        description: workingOntology.description,
-        entity_types: workingOntology.entity_types,
-        relation_types: workingOntology.relation_types,
-        relation_constraints: workingOntology.relation_constraints
-      })
+      if (!workingOntology.ontology_id) {
+        await createOntology(workingOntology)
+      } else {
+        await updateOntology(workingOntology.ontology_id, {
+          version: workingOntology.version,
+          name: workingOntology.name,
+          description: workingOntology.description,
+          entity_types: workingOntology.entity_types,
+          relation_types: workingOntology.relation_types,
+          relation_constraints: workingOntology.relation_constraints
+        })
+      }
       setHasChanges(false)
       setValidationResult({
         isValid: true,
@@ -105,8 +110,9 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
     setIsValidating(true)
     try {
-      const result = await validateOntologyStore(workingOntology.ontology_id)
+      const result = await validateOntologyDraft(workingOntology)
       setValidationResult({
+        draftKey,
         isValid: result.is_valid,
         warnings: result.warnings,
         error: result.error_message
@@ -114,7 +120,8 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     } catch (error) {
       setValidationResult({
         isValid: false,
-        error: error instanceof Error ? error.message : '验证失败'
+        error: error instanceof Error ? error.message : '验证失败',
+        draftKey
       })
     } finally {
       setIsValidating(false)
@@ -124,6 +131,16 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
   const handleImportClick = () => {
     setImportDialogOpen(true)
   }
+
+  const handleGeneratedDraft = (draft: CreateOntologyDto) => {
+    if (draft.project_id !== projectId) return
+    setWorkingOntology(current => applyGeneratedOntology(current, draft))
+    setHasChanges(true)
+    setValidationResult(null)
+  }
+
+  const generationDialog = <OntologyGenerateDialog key={projectId} projectId={projectId}
+    language={workingOntology?.language} onApply={handleGeneratedDraft} />
 
   const handleImportOntology = async (jsonData: string) => {
     setIsImporting(true)
@@ -145,6 +162,13 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
 
   const handleClearOntology = async () => {
     if (!workingOntology) return
+    if (!workingOntology.ontology_id) {
+      clearError()
+      setWorkingOntology(null)
+      setHasChanges(false)
+      setValidationResult(null)
+      return
+    }
 
     const confirmed = window.confirm(
       '确定要清除当前本体吗？清除后可以重新创建或导入新本体。此操作不可撤销。'
@@ -240,8 +264,8 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
         description: '项目默认本体规范',
         language: 'zh',
         // Note: 'Other' is required by validator for fallback classification
-        entity_types: ['Person', 'Organization', 'Location', 'Event', 'Concept', 'Other'],
-        relation_types: ['关联', '属于', '位于', '参与', '影响', 'Other']
+        entity_types: ['人物', '机构', '地点', '事件', '概念', '其他'],
+        relation_types: ['关联', '属于', '位于', '参与', '影响', '其他']
       })
       setWorkingOntology({ ...newOntology })
     } catch (error) {
@@ -262,7 +286,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
     )
   }
 
-  if (error) {
+  if (error && !workingOntology) {
     return (
       <Card className="border-destructive">
         <CardContent className="p-6">
@@ -295,6 +319,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
               本体定义了知识图谱的实体类型和关系类型，是进行知识抽取的基础。
             </p>
             <div className="flex justify-center gap-4">
+              {generationDialog}
               <Button 
                 onClick={handleCreateOntology}
                 disabled={isCreating}
@@ -383,6 +408,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
             <Download className="w-4 h-4 mr-2" />
             导出
           </Button>
+          {generationDialog}
           <Button variant="outline" onClick={handleClearOntology} disabled={isClearing} className="text-destructive hover:text-destructive">
             <Trash2 className="w-4 h-4 mr-2" />
             {isClearing ? '清除中...' : '清除'}
@@ -395,7 +421,7 @@ export function OntologyEditor({ projectId }: OntologyEditorProps) {
       </div>
 
       {/* Validation Result */}
-      {validationResult && (
+      {validationResult && (!validationResult.draftKey || validationResult.draftKey === draftKey) && (
         <Card
           className={
             validationResult.isValid

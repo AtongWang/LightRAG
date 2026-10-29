@@ -28,12 +28,10 @@ class MineruCloudParser(MineruAPIParser):
         return bool(self._token)
 
     async def _get_session(self):
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.config.api_timeout),
-                trust_env=True,
-            )
-        return self._session
+        return aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.config.api_timeout),
+            trust_env=True,
+        )
 
     async def _api(self, session, method, path, **kwargs):
         async with session.request(

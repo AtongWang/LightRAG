@@ -18,7 +18,7 @@ interface DocumentFile {
   file_type: string
   file_size: number
   upload_time: string
-  status: 'pending' | 'parsing' | 'completed' | 'failed'
+  status: 'pending' | 'parsing' | 'ready' | 'building' | 'completed' | 'failed'
   entity_count?: number
   relation_count?: number
   error_message?: string
@@ -95,7 +95,9 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
           file_type: getFileType(filename),
           file_size: doc.content_length || 0,
           upload_time: doc.created_at,
-          status: statusMap[doc.status] || 'pending',
+          status: doc.metadata?.defer_graph && doc.status === 'preprocessed'
+            ? doc.metadata.graph_status === 'building' ? 'building' : doc.metadata.graph_status === 'failed' ? 'failed' : 'ready'
+            : statusMap[doc.status] || 'pending',
           entity_count: doc.entity_count ?? 0,
           relation_count: doc.relation_count ?? 0,
           error_message: doc.error_msg
@@ -234,6 +236,8 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
     const config = {
       pending: { class: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300', label: '等待中' },
       parsing: { class: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300', label: '解析中' },
+      ready: { class: 'bg-amber-100 text-amber-700', label: '已解析，待确认本体' },
+      building: { class: 'bg-blue-100 text-blue-700', label: '图谱构建中' },
       completed: { class: 'bg-[hsl(var(--jade)/0.15)] text-[hsl(var(--jade))]', label: '已完成' },
       failed: { class: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300', label: '失败' }
     }
@@ -277,6 +281,7 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
         >
           <option value="all">全部状态</option>
           <option value="completed">已完成</option>
+          <option value="ready">已解析，待构建</option>
           <option value="parsing">解析中</option>
           <option value="pending">等待中</option>
           <option value="failed">失败</option>
@@ -397,7 +402,7 @@ export function FileList({ projectId, refreshTrigger }: FileListProps) {
                     </div>
                     <div className="min-w-0">
                       <p className="font-medium text-foreground truncate">{file.filename}</p>
-                      {file.status === 'completed' && (
+                      {(file.status === 'completed' || file.status === 'ready') && (
                         <p className="text-xs text-muted-foreground">
                           {file.entity_count} 个实体 · {file.relation_count} 个关系
                         </p>

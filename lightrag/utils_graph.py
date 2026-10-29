@@ -28,7 +28,7 @@ def scope_extraction(nodes: dict, edges: dict, project_id: str | None):
             {
                 **entry,
                 "entity_name": prefix + name,
-                "display_name": name,
+                "display_name": entry.get("display_name", name),
                 "project_id": project_id,
             }
             for entry in entries

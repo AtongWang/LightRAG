@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { FileText, Users, Link2, ChevronRight, Search, SlidersHorizontal } from 'lucide-react'
+import { formatGraphDescription } from '@/utils/graphDescription'
 
 interface Entity {
   id: string
@@ -159,7 +160,7 @@ export function ParseResultViewer({ result }: { result: ParseResult }) {
                       </span>
                     </div>
                     {entity.description && (
-                      <p className="text-sm text-gray-600 mb-2">{entity.description}</p>
+                      <p className="text-sm text-gray-600 mb-2 whitespace-pre-line break-words">{formatGraphDescription(entity.description)}</p>
                     )}
                     {entity.attributes && Object.keys(entity.attributes).length > 0 && (
                       <div className="flex flex-wrap gap-2">

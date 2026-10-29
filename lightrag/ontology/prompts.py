@@ -28,7 +28,7 @@ class OntologyPromptInjector:
         - 限定 entity_type / relation_type 的取值范围
         - 提供类型约束（是否严格遵循取决于模型）
         """
-        if str(language).lower().startswith("zh"):
+        if str(language).lower().startswith(("zh", "ch")):
             return (
                 "---Ontology (Injected)---\n"
                 f"本体名称: {spec.name}\n"

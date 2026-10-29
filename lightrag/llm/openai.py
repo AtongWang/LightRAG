@@ -590,7 +590,21 @@ async def openai_complete_if_cache(
 
                 # Validate final content
                 if not final_content or final_content.strip() == "":
-                    logger.error("Received empty content from OpenAI API")
+                    usage = getattr(response, "usage", None)
+                    logger.error(
+                        "Received empty content from OpenAI API: model=%s finish_reason=%s "
+                        "reasoning_chars=%s refusal_present=%s tool_calls=%s "
+                        "prompt_tokens=%s completion_tokens=%s max_tokens=%s max_completion_tokens=%s",
+                        model,
+                        getattr(response.choices[0], "finish_reason", None),
+                        len(reasoning_content or ""),
+                        bool(getattr(message, "refusal", None)),
+                        len(getattr(message, "tool_calls", None) or []),
+                        getattr(usage, "prompt_tokens", None),
+                        getattr(usage, "completion_tokens", None),
+                        kwargs.get("max_tokens"),
+                        kwargs.get("max_completion_tokens"),
+                    )
                     await openai_async_client.close()  # Ensure client is closed
                     raise InvalidResponseError("Received empty content from OpenAI API")
 

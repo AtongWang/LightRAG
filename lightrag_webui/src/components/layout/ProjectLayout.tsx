@@ -20,7 +20,8 @@ import {
   ChevronRight,
   Home,
   Scroll,
-  Link2
+  Link2,
+  Settings
 } from 'lucide-react'
 import type { Project } from '@/types/project'
 
@@ -86,7 +87,7 @@ export default function ProjectLayout() {
     setCurrentTab(tab)
   }, [location])
 
-  if (loading) {
+  if (loading && (!currentProject || currentProject.project_id !== projectId)) {
     return (
       <div className="flex h-full w-full flex-col">
         {/* 骨架屏 */}
@@ -176,7 +177,7 @@ export default function ProjectLayout() {
             <span className="font-medium text-foreground">{currentProject.name}</span>
             <ChevronRight className="w-4 h-4 mx-2 text-muted-foreground/50" />
             <span className="text-[hsl(var(--vermillion))]">
-              {t(`project.tabs.${currentTab}`, currentTab === 'documents' ? '文档' : currentTab === 'ontology' ? '本体' : currentTab === 'graph' ? '图谱' : currentTab === 'table' ? '表格' : '对话')}
+              {t(`project.tabs.${currentTab}`, currentTab === 'documents' ? '文档' : currentTab === 'ontology' ? '本体' : currentTab === 'graph' ? '图谱' : currentTab === 'table' ? '表格' : currentTab === 'settings' ? '设置' : '对话')}
             </span>
           </div>
 
@@ -217,6 +218,8 @@ export default function ProjectLayout() {
                 icon={<MessageSquareIcon className="w-4 h-4" />}
                 label={t('project.tabs.chat', '对话')}
               />
+              <NavigationTab value="settings" currentTab={currentTab} projectId={currentProject.project_id}
+                icon={<Settings className="w-4 h-4" />} label="设置" />
             </TabsList>
           </Tabs>
         </div>

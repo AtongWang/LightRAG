@@ -10,6 +10,7 @@ import ThemeProvider from '@/components/ThemeProvider'
 // Layout components
 import MainLayout from '@/components/layout/MainLayout'
 import ProjectLayout from '@/components/layout/ProjectLayout'
+import { ProjectSettings } from '@/features/projects/ProjectSettings'
 
 // Feature components
 import { ProjectsList } from '@/features/projects/ProjectsList'
@@ -93,6 +94,7 @@ const AppContent = () => {
           <Route path="graph" element={<ProjectGraph />} />
           <Route path="table" element={<ProjectTable />} />
           <Route path="chat" element={<ProjectChat />} />
+          <Route path="settings" element={<ProjectSettings />} />
 
           {/* 默认重定向到文档标签页 */}
           <Route index element={<ProjectDocuments />} />

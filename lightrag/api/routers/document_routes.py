@@ -939,6 +939,19 @@ def get_unique_filename_in_enqueued(target_dir: Path, original_name: str) -> str
     return f"{base_name}_{timestamp}{extension}"
 
 
+def find_enqueued_copies(path: Path) -> list[Path]:
+    """Match only numeric rename suffixes within the original document directory."""
+    if not path.parent.is_dir():
+        return []
+    prefix = f"{path.stem}_"
+    return sorted(
+        candidate for candidate in path.parent.iterdir()
+        if candidate.is_file() and candidate.suffix == path.suffix
+        and candidate.stem.startswith(prefix)
+        and candidate.stem[len(prefix):].isdigit()
+    )
+
+
 # Document processing helper functions (synchronous)
 # These functions run in thread pool via asyncio.to_thread() to avoid blocking the event loop
 
@@ -2059,6 +2072,7 @@ async def background_delete_documents(
 def create_document_routes(
     rag: LightRAG, doc_manager: DocumentManager, api_key: Optional[str] = None
 ):
+    router = APIRouter(prefix="/documents", tags=["documents"])
     # Create combined auth dependency for document routes
     combined_auth = get_combined_auth_dependency(api_key)
 
@@ -2128,6 +2142,7 @@ def create_document_routes(
                 metadata = {
                     "project_id": project_id,
                     "storage_file_path": f"{project.project_id}/{safe_filename}",
+                    "defer_graph": True,
                 }
 
             if not doc_manager.is_supported_file(safe_filename):
@@ -3352,6 +3367,7 @@ def create_document_routes(
             # Try multiple possible file locations:
             # 1. Original input directory
             # 2. __enqueued__ subdirectory (where files are moved after processing)
+            file_path = Path(file_path)
             full_path = doc_manager.input_dir / file_path
             if not full_path.exists():
                 # Try __enqueued__ directory
@@ -3361,9 +3377,7 @@ def create_document_routes(
                 else:
                     # Try to find the file by name in __enqueued__ directory
                     # in case the filename was made unique
-                    import glob
-                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
-                    matches = glob.glob(pattern)
+                    matches = find_enqueued_copies(enqueued_path)
                     if matches:
                         full_path = Path(matches[0])
                     else:
@@ -3469,6 +3483,7 @@ def create_document_routes(
             # Try multiple possible file locations:
             # 1. Original input directory
             # 2. __enqueued__ subdirectory (where files are moved after processing)
+            file_path = Path(file_path)
             full_path = doc_manager.input_dir / file_path
             if not full_path.exists():
                 # Try __enqueued__ directory
@@ -3478,9 +3493,7 @@ def create_document_routes(
                 else:
                     # Try to find the file by name in __enqueued__ directory
                     # in case the filename was made unique
-                    import glob
-                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
-                    matches = glob.glob(pattern)
+                    matches = find_enqueued_copies(enqueued_path)
                     if matches:
                         full_path = Path(matches[0])
                     else:
@@ -3718,15 +3731,14 @@ def create_document_routes(
                 )
 
             # Try multiple possible file locations
+            file_path = Path(file_path)
             full_path = doc_manager.input_dir / file_path
             if not full_path.exists():
                 enqueued_path = doc_manager.input_dir / "__enqueued__" / file_path
                 if enqueued_path.exists():
                     full_path = enqueued_path
                 else:
-                    import glob
-                    pattern = str(doc_manager.input_dir / "__enqueued__" / f"{file_path.stem}*{file_path.suffix}")
-                    matches = glob.glob(pattern)
+                    matches = find_enqueued_copies(enqueued_path)
                     if matches:
                         full_path = Path(matches[0])
                     else:

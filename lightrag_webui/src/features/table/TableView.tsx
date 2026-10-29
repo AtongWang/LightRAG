@@ -15,6 +15,7 @@ import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import { getMultimodalNodeType, isMultimodalNode, MultimodalType } from '@/types/multimodal'
 import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
+import { formatGraphDescription } from '@/utils/graphDescription'
 
 /**
  * TableView - Table view for knowledge graph nodes
@@ -190,10 +191,9 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
       cell: info => {
         const value = info.getValue()
         if (!value) return '-'
-        const truncated = String(value).length > 100
-          ? String(value).substring(0, 100) + '...'
-          : value
-        return truncated
+        const description = formatGraphDescription(String(value))
+        const truncated = description.length > 100 ? description.substring(0, 100) + '...' : description
+        return <span className="whitespace-pre-line break-words" title={description}>{truncated}</span>
       },
       size: 300
     }),
@@ -293,10 +293,9 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
       cell: info => {
         const value = info.getValue()
         if (!value) return '-'
-        const truncated = String(value).length > 100
-          ? String(value).substring(0, 100) + '...'
-          : value
-        return truncated
+        const description = formatGraphDescription(String(value))
+        const truncated = description.length > 100 ? description.substring(0, 100) + '...' : description
+        return <span className="whitespace-pre-line break-words" title={description}>{truncated}</span>
       },
       size: 300
     })

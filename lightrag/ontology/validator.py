@@ -16,8 +16,8 @@ class OntologyValidator:
         """验证实体类型列表"""
         if not isinstance(entity_types, list) or not entity_types:
             return ValidationResult(False, "entity_types 不能为空")
-        if "Other" not in entity_types:
-            return ValidationResult(False, "entity_types 必须包含 'Other'")
+        if not {"Other", "其他"}.intersection(entity_types):
+            return ValidationResult(False, "entity_types 必须包含 '其他'（或兼容的 'Other'）")
         for et in entity_types:
             if not isinstance(et, str) or not et.strip():
                 return ValidationResult(False, f"无效的 entity_type: '{et}'")
@@ -30,8 +30,8 @@ class OntologyValidator:
         """验证关系类型列表"""
         if not isinstance(relation_types, list) or not relation_types:
             return ValidationResult(False, "relation_types 不能为空")
-        if "Other" not in relation_types:
-            return ValidationResult(False, "relation_types 必须包含 'Other'")
+        if not {"Other", "其他"}.intersection(relation_types):
+            return ValidationResult(False, "relation_types 必须包含 '其他'（或兼容的 'Other'）")
         for rt in relation_types:
             if not isinstance(rt, str) or not rt.strip():
                 return ValidationResult(False, f"无效的 relation_type: '{rt}'")

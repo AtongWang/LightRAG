@@ -88,17 +88,17 @@ export const useProjectStore = create<ProjectStore>()(
       updateProject: async (projectId: string, data: UpdateProjectDto) => {
         set({ loading: true, error: null })
         try {
-          await api.updateProject(projectId, data)
+          const updated = await api.updateProject(projectId, data)
 
           // 更新本地状态
           set(state => ({
             projects: state.projects.map(p =>
               p.project_id === projectId
-                ? { ...p, ...data, updated_at: new Date().toISOString() }
+                ? updated
                 : p
             ),
             currentProject: state.currentProject?.project_id === projectId
-              ? { ...state.currentProject, ...data, updated_at: new Date().toISOString() }
+              ? updated
               : state.currentProject,
             loading: false
           }))

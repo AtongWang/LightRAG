@@ -33,8 +33,8 @@ const DEMO_TEMPLATES = [
       name: '通用知识图谱',
       description: '适用于多领域的通用本体',
       language: 'zh',
-      entity_types: ['Person', 'Organization', 'Location', 'Event', 'Concept', 'Product', 'Document', 'Time', 'Other'],
-      relation_types: ['关联', '属于', '位于', '参与', '创建', '包含', '影响', '发生于', 'Other']
+      entity_types: ['人物', '机构', '地点', '事件', '概念', '产品', '文献', '时间', '其他'],
+      relation_types: ['关联', '属于', '位于', '参与', '创建', '包含', '影响', '发生于', '其他']
     }
   },
   {
@@ -45,8 +45,8 @@ const DEMO_TEMPLATES = [
       name: '学术论文知识图谱',
       description: '用于学术论文分析和引文网络构建',
       language: 'zh',
-      entity_types: ['Author', 'Paper', 'Institution', 'Conference', 'Journal', 'Dataset', 'Method', 'Task', 'Other'],
-      relation_types: ['撰写', '引用', '使用', '属于', '提出', '评测', '发表于', '合作', 'Other']
+      entity_types: ['作者', '论文', '机构', '会议', '期刊', '数据集', '方法', '任务', '其他'],
+      relation_types: ['撰写', '引用', '使用', '属于', '提出', '评测', '发表于', '合作', '其他']
     }
   },
   {
@@ -57,8 +57,8 @@ const DEMO_TEMPLATES = [
       name: '企业商业知识图谱',
       description: '用于企业关系分析、供应链和市场研究',
       language: 'zh',
-      entity_types: ['Company', 'Person', 'Product', 'Industry', 'Location', 'Event', 'Patent', 'Brand', 'Other'],
-      relation_types: ['投资', '收购', '合作', '竞争', '供应', '任职', '创立', '生产', '位于', 'Other']
+      entity_types: ['企业', '人物', '产品', '行业', '地点', '事件', '专利', '品牌', '其他'],
+      relation_types: ['投资', '收购', '合作', '竞争', '供应', '任职', '创立', '生产', '位于', '其他']
     }
   },
   {
@@ -69,8 +69,8 @@ const DEMO_TEMPLATES = [
       name: '医疗健康知识图谱',
       description: '用于医疗健康领域的知识抽取和分析',
       language: 'zh',
-      entity_types: ['Disease', 'Symptom', 'Drug', 'Treatment', 'Doctor', 'Hospital', 'BodyPart', 'MedicalTest', 'Other'],
-      relation_types: ['治疗', '引起', '表现为', '检查', '禁忌', '适用于', '属于', '就职于', 'Other']
+      entity_types: ['疾病', '症状', '药物', '疗法', '医生', '医院', '身体部位', '医学检查', '其他'],
+      relation_types: ['治疗', '引起', '表现为', '检查', '禁忌', '适用于', '属于', '就职于', '其他']
     }
   }
 ]

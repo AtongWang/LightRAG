@@ -16,10 +16,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/Popover'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
+import { ChatMarkdown } from './ChatMarkdown'
+import { splitReasoning } from '@/utils/reasoning'
 import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 import 'katex/dist/katex.min.css'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
@@ -420,7 +418,7 @@ export function ChatInterface() {
       .filter(msg => msg.role !== 'system' && msg.id !== 'welcome')
       .map(msg => ({
         role: msg.role as 'user' | 'assistant',
-        content: msg.content
+        content: msg.role === 'assistant' ? splitReasoning(msg.content).answer : msg.content
       }))
   }, [messages])
 
@@ -601,7 +599,7 @@ export function ChatInterface() {
             )}
           >
             <div className={cn(
-              "flex gap-3 max-w-[75%]",
+              "flex gap-3 min-w-0 max-w-[95%] md:max-w-[85%]",
               message.role === 'user' && 'flex-row-reverse'
             )}>
               {/* 头像 */}
@@ -624,11 +622,11 @@ export function ChatInterface() {
 
               {/* 消息内容 */}
               <div className={cn(
-                "flex flex-col",
+                "flex min-w-0 flex-col",
                 message.role === 'user' ? 'items-end' : 'items-start'
               )}>
                 <div className={cn(
-                  "rounded-2xl px-4 py-3 shadow-sm",
+                  "min-w-0 max-w-full rounded-2xl px-4 py-3 shadow-sm",
                   message.role === 'user'
                     ? 'bg-gradient-to-br from-[hsl(var(--vermillion))] to-[hsl(var(--vermillion-dark))] text-white rounded-tr-md'
                     : message.role === 'assistant'
@@ -652,21 +650,23 @@ export function ChatInterface() {
                       </div>
                     ) : message.role === 'assistant' ? (
                       (() => {
-                        const inlineBlocks = parseInlineMultimodalBlocks(message.content)
+                        const reasoning = splitReasoning(message.content, loading && message.id === messages[messages.length - 1]?.id)
+                        const inlineBlocks = parseInlineMultimodalBlocks(reasoning.answer)
                         return (
                           <div className="space-y-3">
+                            {(reasoning.thinking || reasoning.isThinking) && <details className="rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-muted-foreground">
+                              <summary className="cursor-pointer text-xs font-medium">{reasoning.isThinking ? '正在思考…' : '思考过程'}</summary>
+                              <div className="mt-2 max-h-80 overflow-y-auto"><ChatMarkdown>{reasoning.thinking}</ChatMarkdown></div>
+                            </details>}
                             {inlineBlocks.map((block, blockIndex) => (
                               block.type === 'text' ? (
                                 <div
                                   key={`text-${message.id}-${blockIndex}`}
                                   className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:text-[hsl(var(--vermillion))] prose-code:bg-[hsl(var(--muted))] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none"
                                 >
-                                  <ReactMarkdown
-                                    remarkPlugins={[remarkGfm, remarkMath]}
-                                    rehypePlugins={[rehypeKatex]}
-                                  >
+                                  <ChatMarkdown>
                                     {block.content}
-                                  </ReactMarkdown>
+                                  </ChatMarkdown>
                                 </div>
                               ) : (
                                 <div key={`mm-${message.id}-${blockIndex}`} className="space-y-2">
