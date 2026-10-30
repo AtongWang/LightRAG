@@ -16,6 +16,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { getMultimodalNodeType, isMultimodalNode, MultimodalType } from '@/types/multimodal'
 import { MultimodalImage, MultimodalTable, MultimodalEquation } from '@/components/multimodal'
 import { formatGraphDescription } from '@/utils/graphDescription'
+import { getNodeDisplayName } from '@/utils/projectGraph'
 
 /**
  * TableView - Table view for knowledge graph nodes
@@ -124,12 +125,8 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
 
     return edges.map(edge => ({
       ...edge,
-      sourceLabel: nodeMap[edge.source]?.properties?.entity_name
-        || nodeMap[edge.source]?.properties?.name
-        || edge.source,
-      targetLabel: nodeMap[edge.target]?.properties?.entity_name
-        || nodeMap[edge.target]?.properties?.name
-        || edge.target
+      sourceLabel: getNodeDisplayName(edge.source, nodeMap[edge.source]?.properties),
+      targetLabel: getNodeDisplayName(edge.target, nodeMap[edge.target]?.properties)
     }))
   }, [rawGraph, graphDataVersion, relationTypeFilter])
 
@@ -161,17 +158,11 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
   }
 
   const nodeColumns = useMemo(() => [
-    columnHelper.accessor('id', {
+    columnHelper.accessor(row => getNodeDisplayName(row.id, row.properties), {
       id: 'id',
-      header: t('graphPanel.table.id', 'ID'),
+      header: t('graphPanel.table.nodeName', '节点名称'),
       cell: info => info.getValue(),
       size: 100
-    }),
-    columnHelper.accessor('labels', {
-      id: 'labels',
-      header: t('graphPanel.table.labels', 'Labels'),
-      cell: info => info.getValue().join(', '),
-      size: 200
     }),
     columnHelper.accessor(row => row.properties?.entity_type, {
       id: 'entity_type',
@@ -269,17 +260,17 @@ const TableView = ({ viewMode: propViewMode }: TableViewProps = {}) => {
       cell: info => info.getValue(),
       size: 140
     }),
-    relationColumnHelper.accessor(row => row.type || row.properties?.relation_type || row.properties?.type, {
-      id: 'relation_type',
-      header: t('graphPanel.table.relationType', 'Type'),
-      cell: info => info.getValue() || '-',
-      size: 160
-    }),
     relationColumnHelper.accessor('sourceLabel', {
       id: 'source',
       header: t('graphPanel.table.source', 'Source'),
       cell: info => info.getValue() || '-',
       size: 220
+    }),
+    relationColumnHelper.accessor(row => row.type || row.properties?.relation_type || row.properties?.type, {
+      id: 'relation_type',
+      header: t('graphPanel.table.relationType', 'Type'),
+      cell: info => info.getValue() || '-',
+      size: 160
     }),
     relationColumnHelper.accessor('targetLabel', {
       id: 'target',

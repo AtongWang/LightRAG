@@ -2,11 +2,17 @@ import { MultiDirectedGraph } from 'graphology'
 import type { RawGraph } from '@/stores/graph'
 import * as Constants from '@/lib/constants'
 
+export function getNodeDisplayName(id: string, properties?: Record<string, unknown>): string {
+  const name = [properties?.display_name, properties?.entity_name, properties?.name]
+    .find(value => typeof value === 'string' && value.trim())
+  return (typeof name === 'string' ? name : id).replace(/^project:[a-f0-9]{32}:/i, '')
+}
+
 export function createProjectSigmaGraph(rawGraph: RawGraph, minSize: number, maxSize: number) {
   const graph = new MultiDirectedGraph()
   for (const node of rawGraph.nodes) {
     graph.addNode(node.id, {
-      label: node.properties?.display_name || node.id,
+      label: getNodeDisplayName(node.id, node.properties),
       color: node.color,
       x: node.x ?? Math.random(),
       y: node.y ?? Math.random(),

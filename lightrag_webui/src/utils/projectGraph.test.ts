@@ -1,6 +1,17 @@
 import { expect, test } from 'bun:test'
-import { createProjectSigmaGraph } from './projectGraph'
+import { createProjectSigmaGraph, getNodeDisplayName } from './projectGraph'
 import type { RawGraph } from '@/stores/graph'
+
+test('node display names hide only scoped prefixes and preserve internal IDs', () => {
+  const id = 'project:25488cde58cfa83a8b2eb43aabf7b120:北魏'
+  expect(getNodeDisplayName(id)).toBe('北魏')
+  expect(getNodeDisplayName(id, { display_name: '北魏时期', entity_name: id })).toBe('北魏时期')
+  expect(getNodeDisplayName(id, { entity_name: id })).toBe('北魏')
+  expect(getNodeDisplayName(id, { display_name: '' })).toBe('北魏')
+  expect(getNodeDisplayName('image:asset-123')).toBe('image:asset-123')
+  expect(getNodeDisplayName('普通名称:子名称')).toBe('普通名称:子名称')
+  expect(id).toBe('project:25488cde58cfa83a8b2eb43aabf7b120:北魏')
+})
 
 test('project graph preserves parallel predicates, reverse directions and display names', () => {
   const raw = {
